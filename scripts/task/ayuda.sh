@@ -1,0 +1,20 @@
+#!/bin/bash
+
+echo " "
+echo "******************************************************************"
+echo "       Informacion para la ejecucion de scripts y programas"
+echo "******************************************************************"
+echo " "
+echo "Registro Continuo:"
+echo "  Iniciar: registrocontinuo start"
+echo "  Detener: registrocontinuo stop"
+echo " "
+echo "Extraer evento:"
+echo "  /home/rsa/ejecutables/extraerevento <nombreArchivoBinario> <tiempoSegundos> <duracionSegundos>"
+echo "  "
+echo "Convertir mseed:"
+echo "  python3 /home/rsa/ejecutables/conversor_mseed.py <1-2> "
+echo "    <1>: Registro continuo"
+echo "    <2>: Evento extraido"
+echo "  "
+exit 0

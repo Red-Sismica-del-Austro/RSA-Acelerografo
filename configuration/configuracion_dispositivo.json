@@ -1,0 +1,20 @@
+{
+    "dispositivo": {
+        "id": "NOM00",
+        "ubicacion": "ubicacion",
+        "fuenteReloj": "0",
+        "deteccionEventos": "no",
+        "publicarEventos": "no"
+    },
+    "directorios": {
+        "archivos_temporales": "/home/rsa/projects/acelerografo-rsa/tmp-files/",
+        "registro_continuo": "/home/rsa/projects/acelerografo-rsa/resultados/registro-continuo/",
+        "eventos_detectados": "/home/rsa/projects/acelerografo-rsa/resultados/eventos-detectados/",
+        "eventos_extraidos": "/home/rsa/projects/acelerografo-rsa/resultados/eventos-extraidos/",
+        "archivos_mseed": "/home/rsa/projects/acelerografo-rsa/resultados/mseed/"
+    },
+    "drive": {
+        "registro_continuo": "token_registro_continuo",
+        "eventos_extraidos": "token_eventos_extraidos"
+    }
+}

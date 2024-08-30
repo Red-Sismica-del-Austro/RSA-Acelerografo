@@ -1,0 +1,7 @@
+{
+    "serverAddress": "ip-servidor",
+    "username": "usuario",
+    "password": "contrasena",
+    "topicSuscription": "registrocontinuo/extraer",
+    "topicPublish": "registrocontinuo/eventos"
+}

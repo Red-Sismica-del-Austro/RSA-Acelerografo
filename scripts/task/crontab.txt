@@ -1,0 +1,16 @@
+
+# Reinicia el registro continuo cada 6 horas: 
+59 5,11,17,23 * * * /usr/local/bin/registrocontinuo stop
+0 */6 * * * /usr/local/bin/registrocontinuo start
+
+# Resetea el circuito al iniciar el sistem:
+@reboot sleep 60 && /usr/local/bin/resetmaster
+
+# Espera 90 segundos al arranque del sistema para ejecutar el registro continuo:
+@reboot sleep 90 && /usr/local/bin/registrocontinuo start
+
+# Limpia los archivos del registro continuo el primer dia de cada mes:
+#10 0 1 * * python3 /home/rsa/ejecutables/LimpiarArchivosRegistro.py
+
+# Copia esta configuracion unicamente en el equipo CHA02:
+#@reboot sleep 60 && sudo /etc/network/rutasEstaticas.sh
