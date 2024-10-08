@@ -60,3 +60,7 @@
 ### Cambios / Optimización 
 - Se realizaron cambios en varios de los scripts para utilizar variables de entorno
 - Esta es la ultima version estable, testeada y lista para ser desplegada en produccion.
+
+## 2024-09-08
+### Cambios
+- Se implemento una nueva estacion de desarrollo y pruebas 
