@@ -64,3 +64,4 @@
 ## 2024-09-08
 ### Cambios
 - Se implemento una nueva estacion de desarrollo y pruebas 
+- Prueba: No pude hacer un pull desde VSCode pero si desde Termius. En Termius utilice el token generado para utenticarme.
