@@ -12,6 +12,9 @@ make
 sudo make check
 sudo make install
 
+# Instalacion ibjansson:
+sudo apt-get install libjansson-dev
+
 # Instalacion libreria paho-mqtt
 sudo pip3 install paho-mqtt
 

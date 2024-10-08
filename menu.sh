@@ -33,7 +33,7 @@ while true; do
       ;;
     1)
       echo "Instalado librerias necesarias..."
-      bash scripts/setup/instalar-librerias.sh
+      bash scripts/setup/instalar_librerias.sh
       ;;
     2)
       echo "Advertencia: Esta opción debe ejecutarse únicamente durante la configuración inicial de una nueva estación."
