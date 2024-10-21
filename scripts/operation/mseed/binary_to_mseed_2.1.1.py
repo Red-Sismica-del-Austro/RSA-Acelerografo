@@ -60,11 +60,14 @@ def leer_archivo_binario(archivo_binario):
 
                 xValue = ((dato_1.astype(np.uint32) << 12) & 0xFF000) + ((dato_2.astype(np.uint32) << 4) & 0xFF0) + ((dato_3.astype(np.uint32) >> 4) & 0xF)
 
+                # Convertir xValue a int32 para manejar valores negativos
+                xValue = xValue.astype(np.int32)
+
                 mask = xValue >= 0x80000
-                xValue[mask] = xValue[mask] & 0x7FFFF
+                #xValue[mask] = xValue[mask] & 0x7FFFF
                 xValue[mask] = -1 * ((~xValue[mask] + 1) & 0x7FFFF)
 
-                datos[j].extend(xValue.astype(np.int32))
+                datos[j].extend(xValue)
 
     datos_np = np.array(datos)
 
@@ -99,14 +102,14 @@ def extraer_tiempo_binario(archivo):
         tramaDatos = np.fromfile(f, np.int8, 2506)
     
     # Extraer valores de tiempo de posiciones específicas
-    hora = tramaDatos[2503]
-    minuto = tramaDatos[2504]
-    segundo = tramaDatos[2505]
+    hora = int(tramaDatos[2503])
+    minuto = int(tramaDatos[2504])
+    segundo = int(tramaDatos[2505])
     n_segundo = hora * 3600 + minuto * 60 + segundo
     
-    anio = tramaDatos[2500] + 2000
-    mes = tramaDatos[2501]
-    dia = tramaDatos[2502]
+    anio = int(tramaDatos[2500]) + 2000
+    mes = int(tramaDatos[2501])
+    dia = int(tramaDatos[2502])
     
     # Crear diccionario de resultados con valores numéricos y cadenas formateadas
     tiempo_binario = {
