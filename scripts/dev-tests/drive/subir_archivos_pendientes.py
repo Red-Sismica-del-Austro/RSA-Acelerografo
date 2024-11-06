@@ -7,12 +7,10 @@ def main():
     if project_local_root:
         # Concatenar PROJECT_LOCAL_ROOT con las diferentes rutas de los archivos y scripts:
         script_subir_archivo_drive = os.path.join(project_local_root, "scripts", "drive", "subir_archivo.py")
+        mseed_directory = os.path.join(project_local_root, "resultados", "mseed")
     else:
         print("La variable de entorno no está definida.")
         return
-
-    # Definir el directorio de archivos .mseed a subir
-    mseed_directory = "/home/rsa/projects/acelerografo/resultados/mseed"
 
     # Verificar si el directorio existe
     if not os.path.exists(mseed_directory):
