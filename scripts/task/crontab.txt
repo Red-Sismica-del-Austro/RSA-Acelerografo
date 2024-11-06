@@ -4,7 +4,10 @@
 0 */6 * * * /usr/local/bin/registrocontinuo start
 
 # Resetea el circuito al iniciar el sistem:
-@reboot sleep 60 && /usr/local/bin/resetmaster
+@reboot sleep 30 && /usr/local/bin/resetmaster
+
+# Escanea y sube los archivos pendientes del directorio /resultados/mseed/ a Google Drive:
+@reboot sleep 60 && python3 /home/rsa/projects/acelerografo/scripts/drive/subir_archivos_pendientes.py 
 
 # Espera 90 segundos al arranque del sistema para ejecutar el registro continuo:
 @reboot sleep 90 && /usr/local/bin/registrocontinuo start
