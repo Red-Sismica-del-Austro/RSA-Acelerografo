@@ -7,11 +7,11 @@
         "publicarEventos": "no"
     },
     "directorios": {
-        "archivos_temporales": "/home/rsa/projects/acelerografo-rsa/tmp-files/",
-        "registro_continuo": "/home/rsa/projects/acelerografo-rsa/resultados/registro-continuo/",
-        "eventos_detectados": "/home/rsa/projects/acelerografo-rsa/resultados/eventos-detectados/",
-        "eventos_extraidos": "/home/rsa/projects/acelerografo-rsa/resultados/eventos-extraidos/",
-        "archivos_mseed": "/home/rsa/projects/acelerografo-rsa/resultados/mseed/"
+        "archivos_temporales": "/home/rsa/projects/acelerografo/tmp-files/",
+        "registro_continuo": "/home/rsa/projects/acelerografo/resultados/registro-continuo/",
+        "eventos_detectados": "/home/rsa/projects/acelerografo/resultados/eventos-detectados/",
+        "eventos_extraidos": "/home/rsa/projects/acelerografo/resultados/eventos-extraidos/",
+        "archivos_mseed": "/home/rsa/projects/acelerografo/resultados/mseed/"
     },
     "drive": {
         "registro_continuo": "token_registro_continuo",

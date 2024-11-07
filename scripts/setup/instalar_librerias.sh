@@ -22,6 +22,9 @@ sudo pip3 install paho-mqtt
 sudo pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 sudo pip3 install --upgrade oauth2client
 
+# Instalacion de Supervisor
+sudo apt-get install supervisor
+
 # Instalacion libreria WirinPi
 #cd /tmp
 #wget https://project-downloads.drogon.net/wiringpi-latest.deb

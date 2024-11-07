@@ -79,19 +79,20 @@ def iniciar_cliente_mqtt(config_mqtt, dispositivo_id):
 def main():
 
     '''
+    Ojo: Esta parte no esta funcionando debido a que el Supervisor no puede trabajar con variables de entorno
     # Obtiene la variable de entorno para definir la ruta del archivo de configuracion:
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
     if project_local_root:
         # Concatenar PROJECT_LOCAL_CONFIG con las diferentes rutas de los archivos y scripts:
-        config_mqtt_path = os.path.join(project_local_root, "configuracion", "configuracion_mqtt.json")
         config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
+        config_mqtt_path = os.path.join(project_local_root, "configuracion", "configuracion_mqtt.json")
     else:
         print("La variable de entorno no están definida.")
         return
     '''
-    
-    config_mqtt_path = "/home/rsa/projects/acelerografo-rsa/configuracion/configuracion_mqtt.json"
-    config_dispositivo_path = "/home/rsa/projects/acelerografo-rsa/configuracion/configuracion_dispositivo.json"
+
+    config_mqtt_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_mqtt.json"
+    config_dispositivo_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_dispositivo.json"
     
     # Lee el archivo de configuración MQTT
     config_mqtt = read_fileJSON(config_mqtt_path)
