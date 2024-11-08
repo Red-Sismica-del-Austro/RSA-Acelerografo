@@ -22,6 +22,7 @@ mkdir -p $PROJECT_LOCAL_ROOT/scripts/acelerografo/libraries
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/mseed
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/mqtt
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/drive
+mkdir -p $PROJECT_LOCAL_ROOT/scripts/task
 
 # Asegurar que los directorios creados tengan la propiedad correcta (sin sudo)
 chown -R $USER:$USER $PROJECT_LOCAL_ROOT
@@ -40,6 +41,9 @@ cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente*.py $PROJECT_LOCAL_ROOT/scri
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed*.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
 cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo*.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_archivo.py
 
+# Copiar el task-script crontab.txt al directorio de proyectos
+cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
+
 # Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh (esto sí requiere sudo)
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do
     script_name=$(basename "$script" .sh)
@@ -49,12 +53,8 @@ done
 # Conceder permisos de ejecución a los task-scripts
 sudo chmod +x /usr/local/bin/*
 
-# Crear un crontab con permiso de superusuario y agregar el contenido del archivo crontab.txt
-sudo crontab -l > mycron
-cat $PROJECT_GIT_ROOT/scripts/task/crontab.txt >> mycron
-echo "" >> mycron  # Añadir una nueva línea al final del archivo
-sudo crontab mycron
-rm mycron
+# Crear un crontab con permiso de superusuario usando el contenido del archivo crontab.txt
+sudo crontab $PROJECT_GIT_ROOT/scripts/task/crontab.txt
 
 # Navegar al directorio donde está el Makefile y ejecutar make
 cd $PROJECT_GIT_ROOT/scripts/setup/

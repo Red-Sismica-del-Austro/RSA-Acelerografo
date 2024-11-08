@@ -1,4 +1,3 @@
-
 # Reinicia el registro continuo cada 6 horas: 
 59 5,11,17,23 * * * /usr/local/bin/registrocontinuo stop
 0 */6 * * * /usr/local/bin/registrocontinuo start
