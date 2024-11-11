@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# Definir la raíz del proyecto en Git y el proyecto local
-#USER_HOME=$(eval echo ~$SUDO_USER)  # Obtiene el home del usuario original cuando se usa sudo
-#PROJECT_GIT_ROOT="$USER_HOME/git/Acelerografo-RSA"
-#PROJECT_LOCAL_ROOT="$USER_HOME/projects/acelerografo-rsa"
-
 echo "Usando la ruta del repositorio Git: $PROJECT_GIT_ROOT"
 echo "Usando la ruta del proyecto local: $PROJECT_LOCAL_ROOT"
 
@@ -45,7 +40,15 @@ cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo*.py $PROJECT_LOCAL_RO
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt 
 
-# Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh (esto sí requiere sudo)
+# Copiar los archivos de configuracion de Supervisor al directorio de configuracion (esto sí requiere sudo)
+sudo cp $PROJECT_GIT_ROOT/scripts/task/mqttcliente.conf /etc/supervisor/conf.d/
+
+# Actualizar Supervisor
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start mqttcliente
+
+# Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh 
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do
     script_name=$(basename "$script" .sh)
     sudo cp "$script" "/usr/local/bin/$script_name"
