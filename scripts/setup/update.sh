@@ -32,6 +32,34 @@ function update_files_if_changed {
     fi
 }
 
+# Función para actualizar el crontab si se detectan cambios en el archivo de origen
+function update_crontab_if_changed {
+    local src_file="$PROJECT_LOCAL_ROOT/scripts/task/crontab.txt"
+    local backup_file="$PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt"
+
+    # Verificar si el archivo de origen existe
+    if [ ! -f "$src_file" ]; then
+        echo "Error: El archivo de origen '$src_file' no existe."
+        return 1
+    fi
+
+    # Si el archivo de respaldo no existe, crear uno inicial
+    if [ ! -f "$backup_file" ]; then
+        echo "Creando archivo de respaldo inicial: $backup_file"
+        cp "$src_file" "$backup_file"
+    fi
+
+    # Comparar el archivo de origen con el archivo de respaldo
+    if ! cmp -s "$src_file" "$backup_file"; then
+        # Si los archivos son diferentes, actualizar el crontab y el archivo de respaldo
+        echo "Detectados cambios en el archivo de crontab. Actualizando..."
+        sudo crontab "$src_file"
+        cp "$src_file" "$backup_file"
+        echo "Crontab actualizado exitosamente."
+    else
+        echo "No se detectaron cambios en el archivo de crontab."
+    fi
+}
 
 # Función para actualizar task-scripts en /usr/local/bin
 function update_task_scripts {
@@ -54,6 +82,9 @@ function update_task_scripts {
         echo "No se detectaron cambios en los task-scripts"
     fi
 }
+
+# Revisar y actualizar el crontab
+update_crontab_if_changed
 
 # Revisar y actualizar archivos en configuración, mqtt, mseed, drive
 update_files_if_changed "$PROJECT_GIT_ROOT/configuration/" "$PROJECT_LOCAL_ROOT/configuracion/"

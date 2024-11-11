@@ -43,6 +43,7 @@ cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo*.py $PROJECT_LOCAL_RO
 
 # Copiar el task-script crontab.txt al directorio de proyectos
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
+cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt 
 
 # Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh (esto sí requiere sudo)
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do
