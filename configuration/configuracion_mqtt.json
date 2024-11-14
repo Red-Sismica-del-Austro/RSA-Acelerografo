@@ -3,5 +3,6 @@
     "username": "usuario",
     "password": "contrasena",
     "topicSuscription": "registrocontinuo/extraer",
-    "topicPublish": "registrocontinuo/eventos"
+    "topicPublish": "registrocontinuo/eventos",
+    "topicStatus": "status"
 }

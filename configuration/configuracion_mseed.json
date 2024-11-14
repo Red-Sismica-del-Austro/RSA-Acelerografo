@@ -1,6 +1,6 @@
 {
-    "NOMBRE(0)": "PROMAS CIMA",
-    "CODIGO(1)": "TST0",
+    "NOMBRE(0)": "NOMBRE COMPLETO",
+    "CODIGO(1)": "NOM00",
     "SENSOR(2)": "ACELEROGRAFICO",
     "CANALES(3)": 3,
     "HAB_CANAL(4)": 1,

@@ -101,6 +101,10 @@ def extraer_tiempo_binario(archivo):
         # Leer 2506 bytes del archivo y almacenarlos en un arreglo de numpy
         tramaDatos = np.fromfile(f, np.int8, 2506)
     
+    if tramaDatos.size < 2506:
+        print("Error: Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto.")
+        return
+    
     # Extraer valores de tiempo de posiciones específicas
     hora = int(tramaDatos[2503])
     minuto = int(tramaDatos[2504])
@@ -110,7 +114,7 @@ def extraer_tiempo_binario(archivo):
     anio = int(tramaDatos[2500]) + 2000
     mes = int(tramaDatos[2501])
     dia = int(tramaDatos[2502])
-    
+       
     # Crear diccionario de resultados con valores numéricos y cadenas formateadas
     tiempo_binario = {
         "anio": anio,
@@ -267,6 +271,9 @@ def main():
         path_registro_continuo = config_dispositivo.get("directorios", {}).get("registro_continuo", "Unknown")
         with open(archivoNombresArchivosRC) as ficheroNombresArchivos:
             lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
+            if len(lineasFicheroNombresArchivos) < 2:
+                print("Error: El archivo de nombres de registro continuo no tiene suficientes líneas.")
+                return
             nombreArchvioRegistroContinuo = lineasFicheroNombresArchivos[1].rstrip('\n')
             archivo_binario = path_registro_continuo + nombreArchvioRegistroContinuo
             path_archivo_salida = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
@@ -276,13 +283,20 @@ def main():
         path_eventos_extraidos = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "Unknown")
         with open(archivoNombresArchivosEE) as ficheroNombresArchivos:
             lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
+            if len(lineasFicheroNombresArchivos) < 1:
+                print("Error: El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
+                return
             archivo_binario = path_eventos_extraidos + lineasFicheroNombresArchivos[0].rstrip('\n')
             path_archivo_salida = path_eventos_extraidos
             print(f'Convirtiendo el archivo: {archivo_binario}')
 
-    
-    codigo_estacion = config_mseed["CODIGO(1)"]
+    # Extraer tiempo del archivo binario
     tiempo_binario = extraer_tiempo_binario(archivo_binario)
+    if tiempo_binario is None:
+        print("Error al extraer el tiempo del archivo binario.")
+        return  
+        
+    codigo_estacion = config_mseed["CODIGO(1)"]
     nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
     datos_archivo_binario, segundos_faltantes = leer_archivo_binario(archivo_binario)
 
