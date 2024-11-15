@@ -1,3 +1,6 @@
+# Verifica cada 6 horas si existen archivos pendientes de subir a Drive:
+50 5,11,17,23 * * * /usr/local/bin/uploadpendingfiles
+
 # Reinicia el registro continuo cada 6 horas: 
 59 5,11,17,23 * * * /usr/local/bin/registrocontinuo stop
 0 */6 * * * /usr/local/bin/registrocontinuo start
@@ -5,8 +8,8 @@
 # Resetea el circuito al iniciar el sistem:
 @reboot sleep 30 && /usr/local/bin/resetmaster
 
-# Escanea y sube los archivos pendientes del directorio /resultados/mseed/ a Google Drive:
-@reboot sleep 60 && python3 /home/rsa/projects/acelerografo/scripts/drive/subir_archivos_pendientes.py 
+# Verifica si existen archivos pendientes de subir a Drive:
+@reboot sleep 60 && /usr/local/bin/uploadpendingfiles
 
 # Espera 90 segundos al arranque del sistema para ejecutar el registro continuo:
 @reboot sleep 90 && /usr/local/bin/registrocontinuo start
