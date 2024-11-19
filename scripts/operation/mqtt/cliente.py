@@ -8,6 +8,7 @@ import logging
 
 ##################################### ~Variables globales~ ############################################
 variable = 0
+loggers = {}
 #######################################################################################################
 
 ######################################### ~Funciones~ #################################################
@@ -135,7 +136,7 @@ def main():
     dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
 
     # Inicializa el logger
-    logger = obtener_logger(id_estacion, log_directory, "mqtt.log")
+    logger = obtener_logger(dispositivo_id, log_directory, "mqtt.log")
 
     # Inicia el cliente mqtt
     iniciar_cliente_mqtt(config_mqtt, dispositivo_id)
