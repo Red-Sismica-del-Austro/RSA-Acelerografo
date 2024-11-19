@@ -3,6 +3,7 @@ import os
 import json
 import paho.mqtt.client as mqtt
 import time
+import logging
 #######################################################################################################
 
 ##################################### ~Variables globales~ ############################################
@@ -27,16 +28,19 @@ def read_fileJSON(nameFile):
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Conectado al broker MQTT con éxito.")
+        logger.info("Conectado al broker MQTT con éxito")
         # Publicar mensaje "online" cuando se reconecta
         if userdata['is_reconnecting']:
             publicar_mensaje(client, userdata['config_mqtt']["topicStatus"], userdata['dispositivo_id'], "online")
             userdata['is_reconnecting'] = False
     else:
-        print(f"Error al conectar al broker MQTT, código de resultado: {rc}")
+        print(f"Error al conectar al broker MQTT. Codigo: {rc}")
+        logger.error(f'Error al conectar al broker MQTT. Codigo: {rc}')
 
 # Función que se llama cuando el cliente se desconecta del broker
 def on_disconnect(client, userdata, rc):
-    print("Desconectado del broker MQTT.")
+    print("Desconectado del broker MQTT")
+    logger.error("Desconectado del broker MQTT")
     userdata['is_reconnecting'] = True
 
 # Función para publicar mensajes por MQTT en formato JSON
@@ -70,8 +74,28 @@ def iniciar_cliente_mqtt(config_mqtt, dispositivo_id):
             time.sleep(1)
 
     except Exception as e:
-        print(f"Error al conectar o publicar en el broker MQTT: {e}")
+        print(f"Error al conectar o publicar en el broker MQTT. Codigo: {e}")
+        logger.error(f"Error al conectar o publicar en el broker MQTT. Codigo: {e}")
 
+# Función para inicializar y obtener el logger de un cliente
+def obtener_logger(id_estacion, log_directory, log_filename):
+    global loggers
+    if id_estacion not in loggers:
+        # Crear un logger para el cliente
+        logger = logging.getLogger(id_estacion)
+        logger.setLevel(logging.DEBUG)
+        # Ruta completa del archivo de log
+        log_path = os.path.join(log_directory, log_filename)
+        # Crear manejador de archivo, apuntando al archivo existente
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setLevel(logging.DEBUG)
+        # Crear formato de logging y añadirlo al manejador
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        # Añadir el manejador al logger
+        logger.addHandler(file_handler)
+        loggers[id_estacion] = logger
+    return loggers[id_estacion]
 
 #######################################################################################################
 
@@ -93,6 +117,7 @@ def main():
 
     config_mqtt_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_mqtt.json"
     config_dispositivo_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_dispositivo.json"
+    log_directory = "/home/rsa/projects/acelerografo/log-files"
     
     # Lee el archivo de configuración MQTT
     config_mqtt = read_fileJSON(config_mqtt_path)
@@ -109,6 +134,10 @@ def main():
     # Obtiene el ID del dispositivo
     dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
 
+    # Inicializa el logger
+    logger = obtener_logger(id_estacion, log_directory, "mqtt.log")
+
+    # Inicia el cliente mqtt
     iniciar_cliente_mqtt(config_mqtt, dispositivo_id)
 
 
