@@ -98,14 +98,15 @@ def Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger):
 
 
 # Función para inicializar y obtener el logger de un cliente
-def obtener_logger(id_estacion, log_directory):
+def obtener_logger(id_estacion, log_directory, log_filename):
     global loggers
     if id_estacion not in loggers:
         # Crear un logger para el cliente
         logger = logging.getLogger(id_estacion)
         logger.setLevel(logging.DEBUG)
-        # Crear manejador de archivo
-        log_path = os.path.join(log_directory, f"{id_estacion}_drive.log")
+        # Ruta completa del archivo de log
+        log_path = os.path.join(log_directory, log_filename)
+        # Crear manejador de archivo, apuntando al archivo existente
         file_handler = logging.FileHandler(log_path)
         file_handler.setLevel(logging.DEBUG)
         # Crear formato de logging y añadirlo al manejador
@@ -174,7 +175,7 @@ def main():
         os.makedirs(log_directory)
 
     # Inicializa el logger
-    logger = obtener_logger(id_estacion, log_directory)
+    logger = obtener_logger(id_estacion, log_directory, "drive.log")
 
     # Verifica si el archivo existe
     if not os.path.isfile(path_completo_archivo):
