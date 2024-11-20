@@ -27,6 +27,7 @@ def read_fileJSON(nameFile):
 
 # Función que se llama cuando el cliente se conecta al broker
 def on_connect(client, userdata, flags, rc):
+    logger = userdata['logger']
     if rc == 0:
         print("Conectado al broker MQTT con éxito.")
         logger.info("Conectado al broker MQTT con éxito")
@@ -40,6 +41,7 @@ def on_connect(client, userdata, flags, rc):
 
 # Función que se llama cuando el cliente se desconecta del broker
 def on_disconnect(client, userdata, rc):
+    logger = userdata['logger']
     print("Desconectado del broker MQTT")
     logger.error("Desconectado del broker MQTT")
     userdata['is_reconnecting'] = True
@@ -50,8 +52,8 @@ def publicar_mensaje(client, topic, id, mensaje):
     client.publish(topic, mensaje_json)
 
 # Función para iniciar el cliente MQTT
-def iniciar_cliente_mqtt(config_mqtt, dispositivo_id):
-    client = mqtt.Client(userdata={'config_mqtt': config_mqtt, 'dispositivo_id': dispositivo_id, 'is_reconnecting': False})
+def iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger):
+    client = mqtt.Client(userdata={'config_mqtt': config_mqtt, 'dispositivo_id': dispositivo_id, 'is_reconnecting': False, 'logger': logger})
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
 
@@ -139,7 +141,7 @@ def main():
     logger = obtener_logger(dispositivo_id, log_directory, "mqtt.log")
 
     # Inicia el cliente mqtt
-    iniciar_cliente_mqtt(config_mqtt, dispositivo_id)
+    iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger)
 
 
 #######################################################################################################

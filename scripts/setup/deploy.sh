@@ -28,6 +28,8 @@ echo 'nueva-estacion.txt' > $PROJECT_LOCAL_ROOT/tmp-files/NombreArchivoRegistroC
 
 # Crea los archivos log
 touch $PROJECT_LOCAL_ROOT/log-files/drive.log
+touch $PROJECT_LOCAL_ROOT/log-files/mqtt.log
+touch $PROJECT_LOCAL_ROOT/log-files/mseed.log
 
 # Copiar los archivos de configuración del proyecto en Git al proyecto local
 cp $PROJECT_GIT_ROOT/configuration/configuracion_dispositivo.json $PROJECT_LOCAL_ROOT/configuracion/
