@@ -9,6 +9,9 @@ import json
 from time import time as timer
 #######################################################################################################
 
+##################################### ~Variables globales~ ############################################
+loggers = {}
+#######################################################################################################
 
 ######################################### ~Funciones~ #################################################
 # Lee un archivo de configuración en formato JSON y devuelve su contenido como un diccionario.
@@ -226,6 +229,27 @@ def obtenerTraza(nombreCanal, num_canal, data, tiempo_binario, segundos_faltante
    
     return traza
 
+
+# Función para inicializar y obtener el logger de un cliente
+def obtener_logger(id_estacion, log_directory, log_filename):
+    global loggers
+    if id_estacion not in loggers:
+        # Crear un logger para el cliente
+        logger = logging.getLogger(id_estacion)
+        logger.setLevel(logging.DEBUG)
+        # Ruta completa del archivo de log
+        log_path = os.path.join(log_directory, log_filename)
+        # Crear manejador de archivo, apuntando al archivo existente
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setLevel(logging.DEBUG)
+        # Crear formato de logging y añadirlo al manejador
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        # Añadir el manejador al logger
+        logger.addHandler(file_handler)
+        loggers[id_estacion] = logger
+    return loggers[id_estacion]
+
 #######################################################################################################
 
 ############################################ ~Main~ ###################################################
@@ -296,10 +320,18 @@ def main():
         print("Error al extraer el tiempo del archivo binario.")
         return  
         
+    # Obtiene el codigo de la estacion
     codigo_estacion = config_mseed["CODIGO(1)"]
+
+    # Obtiene el ID del dispositivo
+    dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
+
+    # Inicializa el logger
+    logger = obtener_logger(dispositivo_id, log_directory, "mqtt.log")
+
+    # Inicializa la conversion del archivo
     nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
     datos_archivo_binario, segundos_faltantes = leer_archivo_binario(archivo_binario)
-
     conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed)
 
     #print('Se ha creado el archivo: %s' %nombre_archivo_mseed)
