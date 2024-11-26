@@ -41,14 +41,26 @@ def on_connect(client, userdata, flags, rc):
 # Función que se llama cuando el cliente se desconecta del broker
 def on_disconnect(client, userdata, rc):
     logger = userdata['logger']
-    print("Desconectado del broker MQTT")
-    logger.error("Desconectado del broker MQTT")
+    if rc != 0:
+        print("Desconexión inesperada del broker MQTT.")
+        logger.error("Desconexión inesperada del broker MQTT. Código de retorno: %d" % rc)
+    else:
+        print("Desconexión limpia del broker MQTT.")
+        logger.info("Desconexión limpia del broker MQTT.")
     userdata['is_reconnecting'] = True
 
 # Función para publicar mensajes por MQTT en formato JSON
 def publicar_mensaje(client, topic, id, mensaje):
     mensaje_json = json.dumps({"id": id, "status": mensaje})
-    client.publish(topic, mensaje_json)
+    try:
+        result = client.publish(topic, mensaje_json)
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise Exception(f"Error al publicar en MQTT. Código de error: {result.rc}")
+        logger = client._userdata['logger']
+        logger.info(f"Mensaje publicado exitosamente en el tópico {topic}: {mensaje_json}")
+    except Exception as e:
+        logger = client._userdata['logger']
+        logger.error(f"Error al intentar publicar en el tópico {topic}. Detalle del error: {e}")
 
 # Función para iniciar el cliente MQTT
 def iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger):
@@ -75,9 +87,10 @@ def iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger):
         while True:
             time.sleep(1)
 
+    except mqtt.MQTTException as e:
+        logger.error(f"Error relacionado con MQTT: {e}")
     except Exception as e:
-        print(f"Error al conectar o publicar en el broker MQTT. Codigo: {e}")
-        logger.error(f"Error al conectar o publicar en el broker MQTT. Codigo: {e}")
+        logger.error(f"Error general al conectar o publicar en el broker MQTT: {e}")
 
 # Función para inicializar y obtener el logger de un cliente
 def obtener_logger(id_estacion, log_directory, log_filename):
