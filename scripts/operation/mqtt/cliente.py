@@ -32,6 +32,7 @@ def on_connect(client, userdata, flags, rc):
         logger.info("Conectado al broker MQTT con éxito")
         # Publicar mensaje "online" cuando se reconecta
         if userdata['is_reconnecting']:
+            logger.info("Publicando mensaje de reconexión...")
             publicar_mensaje(client, userdata['config_mqtt']["topicStatus"], userdata['dispositivo_id'], "online")
             userdata['is_reconnecting'] = False
     else:
@@ -83,10 +84,7 @@ def iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger):
         # Publicar mensaje de inicio
         publicar_mensaje(client, config_mqtt["topicStatus"], dispositivo_id, "on")
 
-        #client.loop_forever()
         client.loop_start()
-        #while True:
-        #    time.sleep(1)
 
     except mqtt.MQTTException as e:
         logger.error(f"Error relacionado con MQTT: {e}")
