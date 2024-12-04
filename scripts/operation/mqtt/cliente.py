@@ -42,10 +42,11 @@ def on_connect(client, userdata, flags, rc):
 def on_disconnect(client, userdata, rc):
     logger = userdata['logger']
     if rc != 0:
-        print("Desconexión inesperada del broker MQTT.")
+        if userdata.get('is_disconnected_logged', False):
+            return
         logger.error("Desconexión inesperada del broker MQTT. Código de retorno: %d" % rc)
+        userdata['is_disconnected_logged'] = True
     else:
-        print("Desconexión limpia del broker MQTT.")
         logger.info("Desconexión limpia del broker MQTT.")
     userdata['is_reconnecting'] = True
 
@@ -84,8 +85,8 @@ def iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger):
 
         #client.loop_forever()
         client.loop_start()
-        while True:
-            time.sleep(1)
+        #while True:
+        #    time.sleep(1)
 
     except mqtt.MQTTException as e:
         logger.error(f"Error relacionado con MQTT: {e}")
@@ -117,19 +118,6 @@ def obtener_logger(id_estacion, log_directory, log_filename):
 ############################################ ~Main~ ###################################################
 def main():
 
-    '''
-    Ojo: Esta parte no esta funcionando debido a que el Supervisor no puede trabajar con variables de entorno
-    # Obtiene la variable de entorno para definir la ruta del archivo de configuracion:
-    project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
-    if project_local_root:
-        # Concatenar PROJECT_LOCAL_CONFIG con las diferentes rutas de los archivos y scripts:
-        config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
-        config_mqtt_path = os.path.join(project_local_root, "configuracion", "configuracion_mqtt.json")
-    else:
-        print("La variable de entorno no están definida.")
-        return
-    '''
-
     config_mqtt_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_mqtt.json"
     config_dispositivo_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_dispositivo.json"
     log_directory = "/home/rsa/projects/acelerografo/log-files"
@@ -152,8 +140,21 @@ def main():
     # Inicializa el logger
     logger = obtener_logger(dispositivo_id, log_directory, "mqtt.log")
 
-    # Inicia el cliente mqtt
-    iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger)
+    client = None
+
+    try:
+        # Inicia el cliente mqtt
+        client = iniciar_cliente_mqtt(config_mqtt, dispositivo_id, logger)
+        # Loop principal
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Finalizando cliente MQTT...")
+        if client:
+            client.loop_stop()
+            client.disconnect()
+            print("Cliente MQTT finalizado correctamente.")
+
 
 
 #######################################################################################################
