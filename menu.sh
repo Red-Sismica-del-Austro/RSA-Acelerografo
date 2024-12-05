@@ -55,6 +55,7 @@ while true; do
     3)
       echo "Actualizando el proyecto.."
       bash scripts/setup/update.sh
+      exit 0
       ;;
     4)
       echo "Saliendo del programa..."

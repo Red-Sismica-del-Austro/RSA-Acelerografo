@@ -116,18 +116,18 @@ def obtener_logger(id_estacion, log_directory, log_filename):
 ############################################ ~Main~ ###################################################
 def main():
 
-    config_mqtt_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_mqtt.json"
-    config_dispositivo_path = "/home/rsa/projects/acelerografo/configuracion/configuracion_dispositivo.json"
+    config_mqtt_file = "/home/rsa/projects/acelerografo/configuracion/configuracion_mqtt.json"
+    config_dispositivo_file = "/home/rsa/projects/acelerografo/configuracion/configuracion_dispositivo.json"
     log_directory = "/home/rsa/projects/acelerografo/log-files"
     
     # Lee el archivo de configuración MQTT
-    config_mqtt = read_fileJSON(config_mqtt_path)
+    config_mqtt = read_fileJSON(config_mqtt_file)
     if config_mqtt is None:
         print("No se pudo leer el archivo de configuración. Terminando el programa.")
         return
     
     # Lee el archivo de configuración del dispositivo
-    config_dispositivo = read_fileJSON(config_dispositivo_path)
+    config_dispositivo = read_fileJSON(config_dispositivo_file)
     if config_dispositivo is None:
         print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
         return

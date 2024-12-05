@@ -7,6 +7,8 @@ import time
 import sys
 import json
 from time import time as timer
+import logging
+import datetime
 #######################################################################################################
 
 ##################################### ~Variables globales~ ############################################
@@ -28,7 +30,7 @@ def read_fileJSON(nameFile):
         return None
     
 
-def leer_archivo_binario(archivo_binario):
+def leer_archivo_binario(archivo_binario, logger):
     start_time = timer()
     datos = [[], [], []]
     tiempos = []
@@ -74,6 +76,8 @@ def leer_archivo_binario(archivo_binario):
 
     datos_np = np.array(datos)
 
+    logger.info(f"Archivo {os.path.basename(archivo_binario)} leido con exito")
+
     # Detectar segundos faltantes en el array tiempos
     tiempos_np = np.array(tiempos)
     segundos_faltantes = []
@@ -82,15 +86,20 @@ def leer_archivo_binario(archivo_binario):
     for idx in missing_indices:
         segundos_faltantes.extend(range(tiempos_np[idx] + 1, tiempos_np[idx + 1]))
 
+    tiempo_incio = datetime.timedelta(seconds=int(tiempos_np[0]))
+    tiempo_final = datetime.timedelta(seconds=int(tiempos_np[-1]))
     
     # Imprimir primeros y últimos elementos de tiempos_np y segundos_faltantes
     print(f"Primer elemento de tiempos_np: {tiempos_np[0]}")
     print(f"Último elemento de tiempos_np: {tiempos_np[-1]}")
 
+    print(f"Tiempo primer elemento: {tiempo_incio}")
+    print(f"Tiempo ultimo elemento: {tiempo_final}")
+
     if segundos_faltantes:
-        print(f"Primer elemento de segundos_faltantes: {segundos_faltantes[0]}")
-        print(f"Último elemento de segundos_faltantes: {segundos_faltantes[-1]}")
-        print(f"Se encontraron {len(segundos_faltantes)} segundos faltantes")
+        logger.warning(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}. Segundos faltantes: {len(segundos_faltantes)}")
+    else:
+        logger.info(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
 
     end_time = timer()
     print(f"Tiempo de ejecución de leer_archivo_binario: {end_time - start_time:.4f} segundos")
@@ -150,7 +159,7 @@ def nombrar_archivo_mseed(codigo_estacion,tiempo_binario):
     
 
 # Convierte los datos procesados del archivo binario a formato Mini-SEED y los guarda con el nombre especificado.
-def conversion_mseed_digital(fileName, path, tiempo_binario, datos_archivo_binario, segundos_faltantes, parametros_mseed):
+def conversion_mseed_digital(fileName, path, tiempo_binario, datos_archivo_binario, segundos_faltantes, parametros_mseed, logger):
     nombre = parametros_mseed["SENSOR(2)"]
 
     # Crear trazas para cada canal
@@ -165,6 +174,7 @@ def conversion_mseed_digital(fileName, path, tiempo_binario, datos_archivo_binar
     
     stData.write(fileNameCompleto, format='MSEED', encoding='STEIM1', reclen=512)
     print('Se ha creado el archivo: %s' %fileNameCompleto)
+    logger.info(f"Archivo {fileName} creado con exito")
 
 
 # Crea una traza de datos con los parámetros especificados y ajusta los datos para incluir ceros en los segundos faltantes si es necesario.
@@ -269,23 +279,24 @@ def main():
     if project_local_root:
         #print(f"PROJECT_LOCAL_ROOT: {project_local_root}")
         # Concatenar PROJECT_LOCAL_CONFIG con las diferentes rutas de los archivos y scripts:
-        config_mseed_path = os.path.join(project_local_root, "configuracion", "configuracion_mseed.json")
-        config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
+        config_mseed_file = os.path.join(project_local_root, "configuracion", "configuracion_mseed.json")
+        config_dispositivo_file = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
         archivoNombresArchivosRC = os.path.join(project_local_root,"tmp-files", "NombreArchivoRegistroContinuo.tmp")
         archivoNombresArchivosEE = os.path.join(project_local_root,"tmp-files","NombreArchivoEventoExtraido.tmp")
         script_subir_archivo_drive = os.path.join(project_local_root,"scripts", "drive","subir_archivo.py")
+        log_directory = os.path.join(project_local_root, "log-files")
     else:
         print("La variable de entorno no están definida.")
         return
 
     # Lee el archivo de configuración mseed
-    config_mseed = read_fileJSON(config_mseed_path)
+    config_mseed = read_fileJSON(config_mseed_file)
     if config_mseed is None:
         print("No se pudo leer el archivo de configuración. Terminando el programa.")
         return
     
     # Lee el archivo de configuración del dispositivo
-    config_dispositivo = read_fileJSON(config_dispositivo_path)
+    config_dispositivo = read_fileJSON(config_dispositivo_file)
     if config_dispositivo is None:
         print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
         return
@@ -298,10 +309,10 @@ def main():
             if len(lineasFicheroNombresArchivos) < 2:
                 print("Error: El archivo de nombres de registro continuo no tiene suficientes líneas.")
                 return
-            nombreArchvioRegistroContinuo = lineasFicheroNombresArchivos[1].rstrip('\n')
-            archivo_binario = path_registro_continuo + nombreArchvioRegistroContinuo
+            binary_filename = lineasFicheroNombresArchivos[1].rstrip('\n')
+            binary_file = path_registro_continuo + binary_filename
             path_archivo_salida = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
-            print(f'Convirtiendo el archivo: {archivo_binario}')
+            print(f'Convirtiendo el archivo: {binary_filename}')
     elif tipoArchivo=='2':
         #Archivos eventos extraidos
         path_eventos_extraidos = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "Unknown")
@@ -310,14 +321,15 @@ def main():
             if len(lineasFicheroNombresArchivos) < 1:
                 print("Error: El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
                 return
-            archivo_binario = path_eventos_extraidos + lineasFicheroNombresArchivos[0].rstrip('\n')
+            binary_file = path_eventos_extraidos + lineasFicheroNombresArchivos[0].rstrip('\n')
             path_archivo_salida = path_eventos_extraidos
-            print(f'Convirtiendo el archivo: {archivo_binario}')
+            print(f'Convirtiendo el archivo: {binary_file}')
 
     # Extraer tiempo del archivo binario
-    tiempo_binario = extraer_tiempo_binario(archivo_binario)
+    tiempo_binario = extraer_tiempo_binario(binary_file)
     if tiempo_binario is None:
         print("Error al extraer el tiempo del archivo binario.")
+        logger.error(f'Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto')
         return  
         
     # Obtiene el codigo de la estacion
@@ -327,12 +339,12 @@ def main():
     dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
 
     # Inicializa el logger
-    logger = obtener_logger(dispositivo_id, log_directory, "mqtt.log")
+    logger = obtener_logger(dispositivo_id, log_directory, "mseed.log")
 
     # Inicializa la conversion del archivo
     nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
-    datos_archivo_binario, segundos_faltantes = leer_archivo_binario(archivo_binario)
-    conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed)
+    datos_archivo_binario, segundos_faltantes = leer_archivo_binario(binary_file, logger)
+    conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed, logger)
 
     #print('Se ha creado el archivo: %s' %nombre_archivo_mseed)
 
@@ -340,13 +352,14 @@ def main():
     print(f"Tiempo total de ejecución: {end_time_total - start_time_total:.4f} segundos")
 
     # Sube los archivos convertidos a Drive
+    '''
     if tipoArchivo=='1':
         subprocess.run(["python3", script_subir_archivo_drive, nombre_archivo_mseed, "3", "1"])
         time.sleep(5)
-        subprocess.run(["python3", script_subir_archivo_drive, nombreArchvioRegistroContinuo, "1", "0"])
+        subprocess.run(["python3", script_subir_archivo_drive, binary_filename, "1", "0"])
     elif tipoArchivo=='2':
         subprocess.run(["python3", script_subir_archivo_drive, nombre_archivo_mseed, "2", "1"])
-
+    '''
 #######################################################################################################
 if __name__ == '__main__':
     main()
