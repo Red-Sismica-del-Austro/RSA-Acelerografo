@@ -81,6 +81,9 @@ char temporalRegistroContinuo[35];
 char archivoEventoDetectado[35];
 char archivoActualRegistroContinuo[35];
 
+// Variavle para mensajes log 
+char mensaje_log[256];
+
 FILE *fp;
 FILE *ftmp;
 FILE *fTramaTmp;
@@ -94,6 +97,7 @@ int ComprobarNTP();
 
 // Metodos para la comunicacion con el dsPIC
 int ConfiguracionPrincipal();
+void write_log(const char *type, const char *message);
 void handle_sigpipe(int sig);
 void LeerArchivoConfiguracion();
 void CrearArchivos();
@@ -114,7 +118,8 @@ struct datos_config *datos_configuracion;
 int main(void)
 {
 
-    printf("\n\nIniciando...\n");
+    printf("\n\nPROGRAMA INICIADO: registro_continuo\n");
+    write_log("INFO", "PROGRAMA INICIADO: registro_continuo");
 
     // Inicializa las variables:
     i = 0;
@@ -140,6 +145,8 @@ int main(void)
     const char *project_local_root = getenv("PROJECT_LOCAL_ROOT");
     if (project_local_root == NULL) {
         fprintf(stderr, "Error: La variable de entorno PROJECT_LOCAL_ROOT no está configurada.\n");
+        write_log("ERROR", "La variable de entorno PROJECT_LOCAL_ROOT no está configurada");
+        write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo");
         return 1;
     }
     static char config_path[256];
@@ -151,45 +158,77 @@ int main(void)
     struct datos_config *datos_configuracion = compilar_json(config_filename);
     if (datos_configuracion == NULL) {
         fprintf(stderr, "Error al leer el archivo de configuracion JSON.\n");
+        write_log("ERROR", "Error al leer el archivo de configuracion JSON");
+        write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo");
         return 1;
     }
-    // Imprime los datos de configuracion recuperados del archivo JSON
+
+    // Imprime el id del dispositivo
     printf("ID: %s\n", datos_configuracion->id);
-    printf("Fuente de reloj: %s\n", datos_configuracion->fuente_reloj);
-    printf("Deteccion de eventos: %s\n", datos_configuracion->deteccion_eventos);
-    
- 
+        
     // Obtiene la referencia de tiempo | 0:RPi 1:GPS 2:RTC
     int fuente_reloj = atoi(datos_configuracion->fuente_reloj); 
     if (fuente_reloj == 0 || fuente_reloj == 1 || fuente_reloj == 2)
     {
         ObtenerReferenciaTiempo(fuente_reloj);
+        printf("Fuente de reloj: %s\n", datos_configuracion->fuente_reloj);
+        // Guarda en el archivo log la referencia de tiempo recuperada
+        snprintf(mensaje_log, sizeof(mensaje_log), "Fuente de reloj: %s", datos_configuracion->fuente_reloj);
+        write_log("INFO", mensaje_log);
     }
     else
     {
-        fprintf(stderr, "Error: No se pudo recuperar la fuente de reloj. Revise el archivo de configuracion.\n");
+        fprintf(stderr, "Advertencia: No se pudo recuperar la fuente de reloj. Revise el archivo de configuracion.\n");
+        write_log("WARNING", "No se pudo leer la configuracion de fuente de reloj");
+        // Establece la hora de red como referencia de tiempo predeterminada
         ObtenerReferenciaTiempo(0);
     }
 
-    // Comprueba que la deteccion de eventos este habilitada en el archivo json para lamar al metodo de inicializacion del filtro FIR
+    // Comprueba la configuracion de deteccion de eventos 
     strncpy(deteccion_eventos, datos_configuracion->deteccion_eventos, sizeof(deteccion_eventos) - 1);
     deteccion_eventos[sizeof(deteccion_eventos) - 1] = '\0'; // Asegurar la terminación nula
-    if (strcmp(deteccion_eventos, "si") == 0){
-        firFloatInit();
+    if ((strcmp(deteccion_eventos, "si") == 0) || (strcmp(deteccion_eventos, "no") == 0))
+    {
+        printf("Deteccion de eventos: %s\n", datos_configuracion->deteccion_eventos);
+        // Guarda en el archivo log los datos de configuracion recuperados del archivo JSON
+        snprintf(mensaje_log, sizeof(mensaje_log), "Deteccion de eventos: %s", datos_configuracion->deteccion_eventos);
+        write_log("INFO", mensaje_log);
+        // Si la deteccion de eventos esta activa inicializa el filtro FIR
+        if (strcmp(deteccion_eventos, "si") == 0)
+        {
+            firFloatInit();
+        } 
     } 
-
+    else
+    {
+        fprintf(stderr, "Advertencia: No se pudo leer la configuracion de deteccion de eventos. Revise el archivo de configuracion.\n");
+        write_log("WARNING", "No se pudo leer la configuracion de deteccion de eventos");
+    }
+        
     // Liberar la memoria del struct datos_config
     free(datos_configuracion);
 
     // Configurar el manejador de SIGPIPE
     signal(SIGPIPE, handle_sigpipe);
+
     // Crear el named pipe
     if (mkfifo(PIPE_NAME, 0666) == -1) {
         if (errno != EEXIST) {
-            perror("Error al crear el pipe");
+            perror("Error al crear el PIPE");
+            write_log("ERROR", "Error al crear el pipe");
+            write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo");
             exit(1);
-        }
+        } 
+        else 
+        {
+        // El pipe ya existe, no es un error crítico
+        write_log("INFO", "Estado del pipe: Existente");
+        } 
     }
+    else
+    {
+        write_log("INFO", "Estado del pipe: Creado con exito");
+    } 
 
     // Bucle infinito
     while (1)
@@ -247,6 +286,32 @@ int ConfiguracionPrincipal()
     printf("****************************************\n");
 }
 
+void write_log(const char *type, const char *message) 
+{
+    // Define el archivo de log
+    const char *log_file = "/home/rsa/projects/acelerografo/log-files/registro_continuo.log";
+
+    // Abre el archivo en modo append
+    FILE *fp_log = fopen(log_file, "a");
+    if (fp_log == NULL) {
+        fprintf(stderr, "Error: No se pudo abrir el archivo de log: %s\n", log_file);
+        return;
+    }
+
+    // Obtiene la fecha y hora actual
+    time_t t = time(NULL);
+    struct tm *tm = localtime(&t);
+
+    // Formatea la fecha y hora
+    char timestamp[30];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm);
+
+    // Escribe el mensaje en el archivo de log
+    fprintf(fp_log, "%s - %s - %s\n", timestamp, type, message);
+
+    // Cierra el archivo
+    fclose(fp_log);
+}
 
 void handle_sigpipe(int sig) {
     printf("SIGPIPE caught. Reader probably disconnected.\n");

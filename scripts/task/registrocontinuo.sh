@@ -8,10 +8,9 @@ case "$1" in
   start)
     echo "Arrancando sistema de registro continuo..."
     sudo killall -q registro_continuo
-    #sudo -E $PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/registro_continuo >> $PROJECT_LOCAL_ROOT/log-files/registro_continuo.log 2>&1 &
     sudo -E $PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/registro_continuo &
-    sleep 5
-    python3 $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py 1 &
+    #sleep 5
+    #python3 $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py 1 &
     ;;
   stop)
     echo "Deteniendo sistema de registro continuo..."
