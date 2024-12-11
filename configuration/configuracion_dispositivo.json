@@ -2,9 +2,9 @@
     "dispositivo": {
         "id": "NOM00",
         "ubicacion": "ubicacion",
-        "fuenteReloj": "0",
-        "deteccionEventos": "no",
-        "publicarEventos": "no"
+        "fuente_reloj": "0",
+        "deteccion_eventos": "no",
+        "publicar_eventos": "no"
     },
     "directorios": {
         "archivos_temporales": "/home/rsa/projects/acelerografo/tmp-files/",
