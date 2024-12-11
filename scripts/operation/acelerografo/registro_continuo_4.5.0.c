@@ -317,6 +317,7 @@ void handle_sigpipe(int sig) {
     printf("SIGPIPE caught. Reader probably disconnected.\n");
 }
 
+/*
 int ComprobarNTP()
 {
     char str1[5];
@@ -330,7 +331,7 @@ int ComprobarNTP()
     fscanf(ftimedate, "%s", str1);
     printf("System clock synchronized: %s\n", str1);
     pclose(ftimedate);
-
+    
     // Comprueba si System clock synchronized == yes
     v = strcmp(str1, str2);
     if (v == 0)
@@ -350,12 +351,28 @@ int ComprobarNTP()
         tiempoRedUNIX = (long)midnight;
         printf("Tiempo UNIX red: %d\n", tiempoRedUNIX);
         printf("****************************************\n");
+        write_log("INFO", "Tiempo de red sincronizado: Si");
         return 1;
     }
     else
     {
-        return 2;
         printf("****************************************\n");
+        write_log("WARNING", "El tiempo de red no esta sincronizado");
+        return 2;
+    }
+}
+*/
+
+int ComprobarNTP() {
+    int status = system("ntpstat > /dev/null 2>&1");
+    if (status == 0) {
+        printf("El reloj está sincronizado con NTP.\n");
+        write_log("INFO", "Sincronizacion NTP: Si");
+        return 1;
+    } else {
+        printf("El reloj no está sincronizado con NTP.\n");
+        write_log("WARNING", "Reloj del sistema no sincronizado con NTP");
+        return 2;
     }
 }
 
