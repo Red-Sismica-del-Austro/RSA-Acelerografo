@@ -11,8 +11,8 @@
 # Verifica si existen archivos pendientes de subir a Drive:
 @reboot sleep 60 && /usr/local/bin/uploadpendingfiles
 
-# Espera 90 segundos al arranque del sistema para ejecutar el registro continuo:
-@reboot sleep 90 && /usr/local/bin/registrocontinuo start
+# Espera 180 segundos al arranque del sistema para ejecutar el registro continuo:
+@reboot sleep 180 && /usr/local/bin/registrocontinuo start
 
 # Limpia los archivos del registro continuo el primer dia de cada mes:
 #10 0 1 * * python3 /home/rsa/ejecutables/LimpiarArchivosRegistro.py

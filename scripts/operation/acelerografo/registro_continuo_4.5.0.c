@@ -146,7 +146,7 @@ int main(void)
     if (project_local_root == NULL) {
         fprintf(stderr, "Error: La variable de entorno PROJECT_LOCAL_ROOT no está configurada.\n");
         write_log("ERROR", "La variable de entorno PROJECT_LOCAL_ROOT no está configurada");
-        write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo");
+        write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo\n");
         return 1;
     }
     static char config_path[256];
@@ -159,7 +159,7 @@ int main(void)
     if (datos_configuracion == NULL) {
         fprintf(stderr, "Error al leer el archivo de configuracion JSON.\n");
         write_log("ERROR", "Error al leer el archivo de configuracion JSON");
-        write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo");
+        write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo\n");
         return 1;
     }
 
@@ -216,7 +216,7 @@ int main(void)
         if (errno != EEXIST) {
             perror("Error al crear el PIPE");
             write_log("ERROR", "Error al crear el pipe");
-            write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo");
+            write_log("ERROR", "PROGRAMA FINALIZADO: registro_continuo\n");
             exit(1);
         } 
         else 
@@ -317,51 +317,6 @@ void handle_sigpipe(int sig) {
     printf("SIGPIPE caught. Reader probably disconnected.\n");
 }
 
-/*
-int ComprobarNTP()
-{
-    char str1[5];
-    const char *str2 = "yes";
-    int v;
-
-    printf("****************************************\n");
-    printf("Comprobando conexion con servidor NTP...\n");
-    // system("timedatectl | grep System | tail -c4");
-    FILE *ftimedate = popen("timedatectl | grep System | tail -c4", "r");
-    fscanf(ftimedate, "%s", str1);
-    printf("System clock synchronized: %s\n", str1);
-    pclose(ftimedate);
-    
-    // Comprueba si System clock synchronized == yes
-    v = strcmp(str1, str2);
-    if (v == 0)
-    {
-        system("date");
-        time_t now;
-        struct tm *lt;
-        now = time(NULL);
-        lt = localtime(&now);
-        lt->tm_year;
-        lt->tm_mon;
-        lt->tm_mday;
-        lt->tm_hour;
-        lt->tm_min;
-        lt->tm_sec;
-        time_t midnight = mktime(lt);
-        tiempoRedUNIX = (long)midnight;
-        printf("Tiempo UNIX red: %d\n", tiempoRedUNIX);
-        printf("****************************************\n");
-        write_log("INFO", "Tiempo de red sincronizado: Si");
-        return 1;
-    }
-    else
-    {
-        printf("****************************************\n");
-        write_log("WARNING", "El tiempo de red no esta sincronizado");
-        return 2;
-    }
-}
-*/
 
 int ComprobarNTP() {
     int status = system("ntpstat > /dev/null 2>&1");
@@ -461,6 +416,7 @@ void CrearArchivos()
     ftmp = fopen(filenameActualRegistroContinuo, "rt");
     if (ftmp == NULL) {
         fprintf(stderr, "Error al abrir el archivo temporal para nombres de archivos RC.\n");
+        write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
         fclose(fp); // Cerrar archivo abierto
         fclose(obj_fp); // Cerrar archivo abierto
         free(config); // Liberar memoria en caso de error
@@ -472,6 +428,7 @@ void CrearArchivos()
     ftmp = fopen(filenameActualRegistroContinuo, "w+");
     if (ftmp == NULL) {
         fprintf(stderr, "Error al abrir el archivo temporal para escritura de nombres de archivos RC.\n");
+        write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
         fclose(fp); // Cerrar archivo abierto
         fclose(obj_fp); // Cerrar archivo abierto
         free(config); // Liberar memoria en caso de error
@@ -483,8 +440,11 @@ void CrearArchivos()
     fwrite(nombreActualARC, sizeof(char), strlen(nombreActualARC), ftmp);
     fwrite(nombreAnteriorARC, sizeof(char), strlen(nombreAnteriorARC), ftmp);
 
-    printf("\nArchivo RC Actual: %s", nombreActualARC);
+    printf("\nArchivo RC Actual: %s\n", nombreActualARC);
     printf("Archivo RC Anterior: %s\n\n", nombreAnteriorARC);
+
+    snprintf(mensaje_log, sizeof(mensaje_log), "Archivo binario creado: %s\n", nombreActualARC);
+    write_log("INFO", mensaje_log);
 
     fclose(ftmp);
 
@@ -627,7 +587,8 @@ void EnviarTiempoLocal()
 void ObtenerTiempoPIC()
 {
 
-    printf("Hora dsPIC: ");
+    char mensaje_pic[100];
+ 
     bcm2835_spi_transfer(0xA5); // Envia el delimitador de final de trama
     bcm2835_delayMicroseconds(TIEMPO_SPI);
 
@@ -649,21 +610,23 @@ void ObtenerTiempoPIC()
     switch (fuenteTiempoPic)
     {
     case 0:
-        printf("RPi ");
+        sprintf(mensaje_pic, "Hora dsPIC: RPi %s", datePICStr);
         break;
     case 1:
-        printf("GPS ");
+        sprintf(mensaje_pic, "Hora dsPIC: GPS %s", datePICStr);
         break;
     case 2:
-        printf("RTC ");
+        sprintf(mensaje_pic, "Hora dsPIC: RTC %s", datePICStr);
         break;
     default:
-        printf("E%d ", fuenteTiempoPic);
+        sprintf(mensaje_pic, "Hora dsPIC: E%d %s", fuenteTiempoPic, datePICStr);
         break;
     }
 
-    // Imprime la trama de tiempo del dsPIC:
-    printf("%s\n", datePICStr);
+    // Imprime y guarda el log del mensaje completo
+    printf("%s\n", mensaje_pic);
+    snprintf(mensaje_log, sizeof(mensaje_log), "%s", mensaje_pic);
+    write_log("INFO", mensaje_log);
 
     // Imprime el tipo de error si es que existe:
     if (fuenteTiempoPic == 3 || fuenteTiempoPic == 4 || fuenteTiempoPic == 5)
@@ -671,17 +634,22 @@ void ObtenerTiempoPIC()
         switch (fuenteTiempoPic)
         {
         case 3:
-            printf("**Error E3/GPS: No se pudo comprobar la trama GPRS\n");
+            sprintf(mensaje_pic,"E3/GPS: No se pudo comprobar la trama GPRS");
             break;
         case 4:
-            printf("**Error E4/RTC: No se pudo recuperar la trama GPRS\n");
+            sprintf(mensaje_pic,"E4/RTC: No se pudo recuperar la trama GPRS");
             break;
         case 5:
-            printf("**Error E5/RTC: El GPS no responde\n");
+            sprintf(mensaje_pic,"E5/RTC: El GPS no responde");
             break;
         }
+        // Imprime y guarda el log del mensaje completo
+        printf("%s\n", mensaje_pic);
+        snprintf(mensaje_log, sizeof(mensaje_log), "%s", mensaje_pic);
+        write_log("WARNING", mensaje_log);
     }
 
+    
     // Calcula el tiempo UNIX de la trama de tiempo recibida del dsPIC
     strptime(datePICStr, "%H:%M:%S %y/%m/%d", &datePIC);        // Convierte el tiempo en string a struct
     strftime(datePicUNIX, sizeof(datePicUNIX), "%s", &datePIC); //%s: The number of seconds since the Epoch, 1970-01-01 00:00:00
