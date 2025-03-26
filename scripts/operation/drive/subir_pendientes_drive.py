@@ -77,14 +77,22 @@ def main():
     
     if mode_acq == "offline":
         print("Modo offline activado.")
-        # Borrar todos los archivos binarios
-        for archivo in archivos_binarios:
-            path_archivo = os.path.join(binary_directory, archivo)
-            try:
-                os.remove(path_archivo)
-                print(f"Archivo binario borrado: {path_archivo}")
-            except Exception as e:
-                print(f"Error al borrar {path_archivo}: {e}")
+        # Crear lista de rutas completas de los archivos binarios
+        binary_files = [os.path.join(binary_directory, f) for f in archivos_binarios]
+        if binary_files:
+            # Encontrar el archivo binario más reciente
+            most_recent_file = max(binary_files, key=os.path.getmtime)
+            print(f"Archivo binario más reciente (no se borrará): {most_recent_file}")
+            # Borrar todos los archivos excepto el más reciente
+            for path_archivo in binary_files:
+                if path_archivo != most_recent_file:
+                    try:
+                        os.remove(path_archivo)
+                        print(f"Archivo binario borrado: {path_archivo}")
+                    except Exception as e:
+                        print(f"Error al borrar {path_archivo}: {e}")
+        else:
+            print("No se encontraron archivos binarios.")
 
         # Verificar espacio disponible en la partición donde se encuentra el directorio mseed
         free_space = get_free_space_percentage(mseed_directory)
@@ -109,7 +117,8 @@ def main():
             free_space = get_free_space_percentage(binary_directory)
             print(f"Espacio libre en el directorio de binarios: {free_space:.2f}%")
             if free_space < 10:
-                print("El espacio disponible es menor al 10%. Se procederá a borrar el archivo binario más antiguo.")
+                print("El espacio disponible es menor al 10%. Se procederá a borrar los archivos binario y mseed más antiguo.")
+                delete_oldest_file(mseed_directory, ".mseed")
                 delete_oldest_file(binary_directory, ".dat")
             else:
                 print("Espacio disponible suficiente en la partición.")
