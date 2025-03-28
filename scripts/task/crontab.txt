@@ -1,9 +1,6 @@
-# Verifica cada 6 horas si existen archivos pendientes de subir a Drive:
-50 5,11,17,23 * * * /usr/local/bin/uploadpendingfiles
-
-# Reinicia el registro continuo cada 6 horas: 
-59 5,11,17,23 * * * /usr/local/bin/registrocontinuo stop
-0 */6 * * * /usr/local/bin/registrocontinuo start
+# Reinicia el registro continuo cada x horas: 
+#0 */6 * * * /usr/local/bin/registrocontinuo restart
+*/5 * * * * /usr/local/bin/registrocontinuo restart
 
 # Resetea el circuito al iniciar el sistem:
 @reboot sleep 30 && /usr/local/bin/resetmaster

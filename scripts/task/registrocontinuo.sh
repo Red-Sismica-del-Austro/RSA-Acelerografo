@@ -12,7 +12,7 @@ case "$1" in
     /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py" 1 &
     pid_mseed=$!
     wait $pid_mseed
-    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/subir_pendientes_drive.py" 
+    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py" 
     ;;
   
   stop)
