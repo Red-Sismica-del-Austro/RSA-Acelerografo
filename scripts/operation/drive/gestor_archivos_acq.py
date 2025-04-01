@@ -31,32 +31,32 @@ def read_fileJSON(nameFile):
 def get_free_space_percentage(path):
     total, used, free = shutil.disk_usage(path)
     percentage = (free / total) * 100
-    logging.info(f"Espacio libre en {path}: {percentage:.2f}%")
     return percentage
 
 # Verifica la conexión a internet intentando conectar al servidor DNS de Google
-def check_internet_connection(host="8.8.8.8", port=53, timeout=3):
+def check_internet_connection(logger, host="8.8.8.8", port=53, timeout=3):
     try:
         socket.setdefaulttimeout(timeout)
         socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
-        logging.info("Conexión a internet verificada.")
+        logger.info("Conexión a internet verificada.")
         return True
     except Exception as e:
-        logging.warning(f"Fallo en la conexión a internet: {e}")
+        logger.warning(f"Fallo en la conexión a internet: {e}")
         return False
 
 # Borra el archivo más antiguo con la extensión indicada en el directorio especificado
-def delete_oldest_file(directory, extension):
+def delete_oldest_file(directory, extension, logger):
     files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(extension)]
     if not files:
-        logging.warning(f"No se encontraron archivos con extensión {extension} en {directory}.")
+        logger.warning(f"No se encontraron archivos con extensión {extension} en {directory}.")
         return
     oldest_file = min(files, key=os.path.getmtime)
+    filename = os.path.basename(oldest_file)
     try:
         os.remove(oldest_file)
-        logging.info(f"Se borró el archivo más antiguo: {oldest_file}")
+        logger.info(f"Se borró el archivo más antiguo: {filename}")
     except Exception as e:
-        logging.error(f"Error al borrar el archivo {oldest_file}: {e}")
+        logger.error(f"Error al borrar el archivo {filename}: {e}")
 
 # Función para inicializar y obtener el logger de un cliente
 def obtener_logger(id_estacion, log_directory, log_filename):
@@ -69,9 +69,9 @@ def obtener_logger(id_estacion, log_directory, log_filename):
         if not os.path.isdir(log_directory):
             try:
                 os.makedirs(log_directory)
-                logger.info(f"Directorio de logs creado: {log_directory}")
+                print(f"Directorio de logs creado: {log_directory}")
             except Exception as e:
-                logger.error(f"Error al crear el directorio de logs {log_directory}: {e}")
+                print(f"Error al crear el directorio de logs {log_directory}: {e}")
         # Ruta completa del archivo de log
         log_path = os.path.join(log_directory, log_filename)
         # Crear manejador de archivo, apuntando al archivo de log
@@ -140,11 +140,12 @@ def main():
             # Borrar todos los archivos excepto el más reciente
             for path_archivo in binary_files:
                 if path_archivo != most_recent_file:
+                    filename_bin = os.path.basename(path_archivo)
                     try:
                         os.remove(path_archivo)
-                        logger.info(f"Archivo binario borrado: {path_archivo}")
+                        logger.info(f"Archivo binario borrado: {filename_bin}")
                     except Exception as e:
-                        logger.error(f"Error al borrar {path_archivo}: {e}")
+                        logger.error(f"Error al borrar {filename_bin}: {e}")
         else:
             logger.warning("No se encontraron archivos binarios en el directorio.")
 
@@ -152,30 +153,29 @@ def main():
         free_space = get_free_space_percentage(mseed_directory)
         if free_space < 10:
             logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar el archivo mseed más antiguo.")
-            delete_oldest_file(mseed_directory, ".mseed")
+            delete_oldest_file(mseed_directory, ".mseed", logger)
     
     elif mode_acq == "online":
         logger.info("Modo online activado.")
-        if check_internet_connection():
-            logger.info("Conexión a internet establecida. Se procederá a subir los archivos mseed a Google Drive.")
+        if check_internet_connection(logger):
+            #logger.info("Conexión a internet establecida. Se procederá a subir los archivos mseed a Google Drive.")
             if archivos_mseed:
                 for archivo in archivos_mseed:
-                    logger.info(f"Subiendo el archivo: {archivo}")
+                    #logger.info(f"Subiendo el archivo: {archivo}")
                     result = subprocess.run(["python3", script_subir_archivo_drive, archivo, "3", "1"])
                     if result.returncode != 0:
                         logger.error(f"Error al subir el archivo {archivo}. Código de retorno: {result.returncode}")
             else:
-                logger.warning("No se encontraron archivos .mseed en el directorio especificado.")
+                logger.warning("No se encontraron archivos mseed en el directorio especificado.")
+
+        # Verificar espacio disponible en el directorio de archivos binarios
+        free_space = get_free_space_percentage(binary_directory)
+        if free_space < 10:
+            logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar el archivo binario más antiguo.")
+            delete_oldest_file(binary_directory, ".dat", logger)
         else:
-            logger.warning("Sin conexión a internet.")
-            # Verificar espacio disponible en el directorio de archivos binarios
-            free_space = get_free_space_percentage(binary_directory)
-            if free_space < 65:
-                logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar los archivos mseed y binario más antiguos.")
-                #delete_oldest_file(mseed_directory, ".mseed")
-                delete_oldest_file(binary_directory, ".dat")
-            else:
-                logger.info("Espacio disponible suficiente en la partición.")
+            logger.info("Espacio disponible suficiente en la partición.")
+    
     else:
         logger.error(f"Modo de adquisición desconocido: {mode_acq}")
  
