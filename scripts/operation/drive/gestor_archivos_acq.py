@@ -136,7 +136,8 @@ def main():
         if binary_files:
             # Encontrar el archivo binario más reciente
             most_recent_file = max(binary_files, key=os.path.getmtime)
-            logger.info(f"Archivo binario más reciente (no se borrará): {most_recent_file}")
+            filename_bin_recent = os.path.basename(most_recent_file)
+            logger.info(f"Archivo binario más reciente (no se borrará): {filename_bin_recent}")
             # Borrar todos los archivos excepto el más reciente
             for path_archivo in binary_files:
                 if path_archivo != most_recent_file:
@@ -167,6 +168,14 @@ def main():
                         logger.error(f"Error al subir el archivo {archivo}. Código de retorno: {result.returncode}")
             else:
                 logger.warning("No se encontraron archivos mseed en el directorio especificado.")
+        else:
+             # Si no hay conexion a internet verifica el espacio disponible 
+            free_space = get_free_space_percentage(mseed_directory)
+            if free_space < 10:
+                logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar el archivo mseed más antiguo.")
+                delete_oldest_file(mseed_directory, ".mseed", logger)
+            else:
+                logger.info("Espacio disponible suficiente en la partición.")
 
         # Verificar espacio disponible en el directorio de archivos binarios
         free_space = get_free_space_percentage(binary_directory)
