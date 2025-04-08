@@ -104,6 +104,13 @@ def obtener_logger(id_estacion, log_directory, log_filename):
         # Crear un logger para el cliente
         logger = logging.getLogger(id_estacion)
         logger.setLevel(logging.DEBUG)
+        # Verificar si el directorio de logs existe, si no, crearlo
+        if not os.path.isdir(log_directory):
+            try:
+                os.makedirs(log_directory)
+                logger.info(f"Directorio de logs creado: {log_directory}")
+            except Exception as e:
+                logger.error(f"Error al crear el directorio de logs {log_directory}: {e}")
         # Ruta completa del archivo de log
         log_path = os.path.join(log_directory, log_filename)
         # Crear manejador de archivo, apuntando al archivo existente

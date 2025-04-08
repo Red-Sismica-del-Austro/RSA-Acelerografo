@@ -4,7 +4,8 @@
         "ubicacion": "ubicacion",
         "fuente_reloj": "0",
         "deteccion_eventos": "no",
-        "publicar_eventos": "no"
+        "publicar_eventos": "no",
+        "modo_adquisicion": "offline"
     },
     "directorios": {
         "archivos_temporales": "/home/rsa/projects/acelerografo/tmp-files/",
