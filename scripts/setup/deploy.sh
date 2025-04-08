@@ -28,6 +28,7 @@ echo 'nueva-estacion.txt' > $PROJECT_LOCAL_ROOT/tmp-files/NombreArchivoRegistroC
 
 # Crea los archivos log
 touch $PROJECT_LOCAL_ROOT/log-files/drive.log
+touch $PROJECT_LOCAL_ROOT/log-files/gestor_acq.log 
 touch $PROJECT_LOCAL_ROOT/log-files/mqtt.log
 touch $PROJECT_LOCAL_ROOT/log-files/mseed.log
 touch $PROJECT_LOCAL_ROOT/log-files/registro_continuo.log
@@ -41,7 +42,7 @@ cp $PROJECT_GIT_ROOT/configuration/configuracion_mseed.json $PROJECT_LOCAL_ROOT/
 cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente*.py $PROJECT_LOCAL_ROOT/scripts/mqtt/cliente.py
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed*.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
 cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo*.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_archivo.py
-cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_pendientes_drive*.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_pendientes_drive.py
+cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_pendientes_drive*.py $PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py
 
 # Copiar el task-script crontab.txt al directorio de proyectos
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
