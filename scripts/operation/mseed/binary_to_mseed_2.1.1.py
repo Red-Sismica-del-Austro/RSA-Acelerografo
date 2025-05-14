@@ -9,6 +9,7 @@ import json
 from time import time as timer
 import logging
 import datetime
+import argparse
 #######################################################################################################
 
 ##################################### ~Variables globales~ ############################################
@@ -267,40 +268,47 @@ def main():
 
     start_time_total = timer()
 
-    # Recibe como parametro el tipo de archivo binario a convertir (1:Resgistro continuo 2:Eventos extraidos)
-    if len(sys.argv) != 2:
-        print("Uso: conversor_mseed.py <tipo_archivo: 1.Registro continuo 2.Evento extraido>")
-        return
+    # Parser de argumentos
+    parser = argparse.ArgumentParser(description="Conversor de binario a Mini-SEED")
+    parser.add_argument("modo_simple", nargs="?", choices=["1", "2"],
+                        help="Modo simple (1: Registro continuo, 2: Evento extraído)")
+    parser.add_argument("--modo", choices=["rc", "ee", "archivo"],
+                        help="Modo de conversión (rc: registro continuo, ee: evento extraído, archivo: conversión manual)")
+    parser.add_argument("--nombre", help="Nombre del archivo binario (solo en modo archivo)")
+    args = parser.parse_args()
 
-    tipoArchivo = sys.argv[1] 
-
-    # Obtiene la variable de entorno para definir la ruta del archivo de configuracion:
+    # Variable de entorno
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
-    if project_local_root:
-        #print(f"PROJECT_LOCAL_ROOT: {project_local_root}")
-        # Concatenar PROJECT_LOCAL_CONFIG con las diferentes rutas de los archivos y scripts:
-        config_mseed_file = os.path.join(project_local_root, "configuracion", "configuracion_mseed.json")
-        config_dispositivo_file = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
-        archivoNombresArchivosRC = os.path.join(project_local_root,"tmp-files", "NombreArchivoRegistroContinuo.tmp")
-        archivoNombresArchivosEE = os.path.join(project_local_root,"tmp-files","NombreArchivoEventoExtraido.tmp")
-        script_subir_archivo_drive = os.path.join(project_local_root,"scripts", "drive","subir_archivo.py")
-        log_directory = os.path.join(project_local_root, "log-files")
+    if not project_local_root:
+        print("La variable de entorno PROJECT_LOCAL_ROOT no está definida.")
+        return
+    config_mseed_file = os.path.join(project_local_root, "configuracion", "configuracion_mseed.json")
+    config_dispositivo_file = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
+    archivoNombresArchivosRC = os.path.join(project_local_root, "tmp-files", "NombreArchivoRegistroContinuo.tmp")
+    archivoNombresArchivosEE = os.path.join(project_local_root, "tmp-files", "NombreArchivoEventoExtraido.tmp")
+    script_subir_archivo_drive = os.path.join(project_local_root, "scripts", "drive", "subir_archivo.py")
+    log_directory = os.path.join(project_local_root, "log-files")
+
+    # Carga de configuraciones
+    config_mseed = read_fileJSON(config_mseed_file)
+    config_dispositivo = read_fileJSON(config_dispositivo_file)
+    if config_mseed is None or config_dispositivo is None:
+        print("Error leyendo archivos de configuración. Terminando el programa.")
+        return
+    
+    # Determinar tipo de archivo y ruta
+    if args.modo_simple in ("1", "2"):
+        tipoArchivo = args.modo_simple
+    elif args.modo == "rc":
+        tipoArchivo = "1"
+    elif args.modo == "ee":
+        tipoArchivo = "2"
+    elif args.modo == "archivo":
+        tipoArchivo = "archivo"
     else:
-        print("La variable de entorno no están definida.")
+        print("Error: No se especificó un modo válido.")
         return
 
-    # Lee el archivo de configuración mseed
-    config_mseed = read_fileJSON(config_mseed_file)
-    if config_mseed is None:
-        print("No se pudo leer el archivo de configuración. Terminando el programa.")
-        return
-    
-    # Lee el archivo de configuración del dispositivo
-    config_dispositivo = read_fileJSON(config_dispositivo_file)
-    if config_dispositivo is None:
-        print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
-        return
-    
     if tipoArchivo=='1':
         #Archivos registro continuo
         path_registro_continuo = config_dispositivo.get("directorios", {}).get("registro_continuo", "Unknown")
@@ -324,6 +332,14 @@ def main():
             binary_file = path_eventos_extraidos + lineasFicheroNombresArchivos[0].rstrip('\n')
             path_archivo_salida = path_eventos_extraidos
             print(f'Convirtiendo el archivo: {binary_file}')
+    elif tipoArchivo == "archivo":
+        if not args.nombre:
+            print("Error: Se debe especificar --nombre con el nombre del archivo binario.")
+            return
+        binary_filename = args.nombre
+        binary_file = os.path.join(project_local_root, "resultados", "registro-continuo", binary_filename)
+        path_archivo_salida = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
+        print(f'Convirtiendo el archivo manual: {binary_file}')
 
     # Extraer tiempo del archivo binario
     tiempo_binario = extraer_tiempo_binario(binary_file)
