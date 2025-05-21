@@ -31,7 +31,7 @@ def read_fileJSON(nameFile):
         return None
     
 
-def leer_archivo_binario(archivo_binario, logger):
+def leer_archivo_binario_0(archivo_binario, logger):
     start_time = timer()
     datos = [[], [], []]
     tiempos = []
@@ -117,6 +117,93 @@ def leer_archivo_binario(archivo_binario, logger):
         logger.warning(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
     else:
         logger.info(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
+
+    end_time = timer()
+    print(f"Tiempo de ejecución de leer_archivo_binario: {end_time - start_time:.4f} segundos")
+    return datos_np, segundos_faltantes if segundos_faltantes else None
+
+def leer_archivo_binario(archivo_binario, logger):
+    start_time = timer()
+    datos = [[], [], []]
+    tiempos = []
+
+    chunk_size = 2506 * 60  # Leer en bloques de aproximadamente 2.5 MB
+    with open(archivo_binario, "rb") as f:
+        while True:
+            chunk = np.fromfile(f, dtype=np.uint8, count=chunk_size)
+            if chunk.size == 0:
+                break
+
+            num_tramas = len(chunk) // 2506
+            if num_tramas == 0:
+                continue
+
+            chunk = chunk[:num_tramas * 2506].reshape((num_tramas, 2506))
+
+            horas = chunk[:, 2503].astype(np.uint32)
+            minutos = chunk[:, 2504].astype(np.uint32)
+            segundos = chunk[:, 2505].astype(np.uint32)
+
+            # Crear máscara de tramas con tiempos válidos
+            mascara_valida = (horas <= 23) & (minutos <= 59) & (segundos <= 59)
+            tramas_invalidas = (~mascara_valida).sum()
+
+            for h, m, s, valido in zip(horas, minutos, segundos, mascara_valida):
+                if not valido:
+                    logger.warning(f"Trama con tiempo inválido detectado: {h:02}:{m:02}:{s:02}")
+                    continue
+                tiempos.append(h * 3600 + m * 60 + s)
+
+            # Filtrar datos crudos solo con tramas válidas
+            chunk_valido = chunk[mascara_valida]
+            datos_crudos = chunk_valido[:, :2500].reshape((-1, 250, 10))
+
+            for j in range(3):
+                dato_1 = datos_crudos[:, :, j * 3 + 1].flatten()
+                dato_2 = datos_crudos[:, :, j * 3 + 2].flatten()
+                dato_3 = datos_crudos[:, :, j * 3 + 3].flatten()
+
+                xValue = ((dato_1.astype(np.uint32) << 12) & 0xFF000) + \
+                         ((dato_2.astype(np.uint32) << 4) & 0xFF0) + \
+                         ((dato_3.astype(np.uint32) >> 4) & 0xF)
+
+                xValue = xValue.astype(np.int32)
+                mask = xValue >= 0x80000
+                xValue[mask] = -1 * ((~xValue[mask] + 1) & 0x7FFFF)
+
+                datos[j].extend(xValue)
+
+    datos_np = np.array(datos)
+
+    logger.info(f"Archivo {os.path.basename(archivo_binario)} leído con éxito")
+
+    if tramas_invalidas > 0:
+        logger.warning(f"Se descartaron {tramas_invalidas} tramas con tiempo inválido para mantener la alineación de datos.")
+
+    tiempos_np = np.array(tiempos)
+    segundos_faltantes = []
+    dif_segundos = np.diff(tiempos_np)
+
+    # Validación de saltos anómalos
+    saltos_grandes = dif_segundos[dif_segundos > 1]
+    if len(saltos_grandes) > 0:
+        top5 = [int(x) for x in sorted(saltos_grandes)[-5:]]
+        total_faltantes = sum(int(x - 1) for x in saltos_grandes)
+        logger.warning(f" Segundos faltantes: {total_faltantes}. Saltos mayores a 1 segundo: {len(saltos_grandes)}. Top 5: {top5}")
+
+    missing_indices = np.where(dif_segundos > 1)[0]
+    for idx in missing_indices:
+        segundos_faltantes.extend(range(tiempos_np[idx] + 1, tiempos_np[idx + 1]))
+
+    tiempo_inicio = datetime.timedelta(seconds=int(tiempos_np[0]))
+    tiempo_final = datetime.timedelta(seconds=int(tiempos_np[-1]))
+
+    print(f"Primer elemento de tiempos_np: {tiempos_np[0]}")
+    print(f"Último elemento de tiempos_np: {tiempos_np[-1]}")
+    print(f"Tiempo primer elemento: {tiempo_inicio}")
+    print(f"Tiempo último elemento: {tiempo_final}")
+
+    logger.info(f"Tiempo primera muestra: {tiempo_inicio}. Tiempo última muestra: {tiempo_final}")
 
     end_time = timer()
     print(f"Tiempo de ejecución de leer_archivo_binario: {end_time - start_time:.4f} segundos")
@@ -345,9 +432,10 @@ def main():
             if len(lineasFicheroNombresArchivos) < 1:
                 print("Error: El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
                 return
-            binary_file = path_eventos_extraidos + lineasFicheroNombresArchivos[0].rstrip('\n')
+            binary_filename = lineasFicheroNombresArchivos[0].rstrip('\n')
+            binary_file = path_eventos_extraidos + binary_filename
             path_archivo_salida = path_eventos_extraidos
-            print(f'Convirtiendo el archivo: {binary_file}')
+            print(f'Convirtiendo el archivo: {binary_filename}')
     elif tipoArchivo == "archivo":
         if not args.nombre:
             print("Error: Se debe especificar --nombre con el nombre del archivo binario.")
@@ -355,7 +443,16 @@ def main():
         binary_filename = args.nombre
         binary_file = os.path.join(project_local_root, "resultados", "registro-continuo", binary_filename)
         path_archivo_salida = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
-        print(f'Convirtiendo el archivo manual: {binary_file}')
+        print(f'Convirtiendo el archivo manual: {binary_filename}')
+
+            
+    # Obtiene el codigo de la estacion
+    codigo_estacion = config_mseed["CODIGO(1)"]
+    # Obtiene el ID del dispositivo
+    dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
+    # Inicializa el logger
+    logger = obtener_logger(dispositivo_id, log_directory, "mseed.log")
+    logger.info(f'Convirtiendo el archivo binario: {binary_filename}')
 
     # Extraer tiempo del archivo binario
     tiempo_binario = extraer_tiempo_binario(binary_file)
@@ -363,15 +460,6 @@ def main():
         print("Error al extraer el tiempo del archivo binario.")
         logger.error(f'Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto')
         return  
-        
-    # Obtiene el codigo de la estacion
-    codigo_estacion = config_mseed["CODIGO(1)"]
-
-    # Obtiene el ID del dispositivo
-    dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
-
-    # Inicializa el logger
-    logger = obtener_logger(dispositivo_id, log_directory, "mseed.log")
 
     # Inicializa la conversion del archivo
     nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
