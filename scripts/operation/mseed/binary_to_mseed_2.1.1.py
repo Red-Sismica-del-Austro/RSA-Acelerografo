@@ -53,8 +53,15 @@ def leer_archivo_binario(archivo_binario, logger):
             minutos = chunk[:, 2504].astype(np.uint32)
             segundos = chunk[:, 2505].astype(np.uint32)
 
-            n_segundos = horas * 3600 + minutos * 60 + segundos
-            tiempos.extend(n_segundos)
+
+            #n_segundos = horas * 3600 + minutos * 60 + segundos
+            #tiempos.extend(n_segundos)
+            for h, m, s in zip(horas, minutos, segundos):
+                if h > 23 or m > 59 or s > 59:
+                    logger.warning(f"Trama con tiempo inválido detectado: {h:02}:{m:02}:{s:02}")
+                    continue
+                tiempos.append(h * 3600 + m * 60 + s)
+
             
             # Procesar los datos de forma vectorizada
             datos_crudos = chunk[:, :2500].reshape((-1, 250, 10))
@@ -64,13 +71,13 @@ def leer_archivo_binario(archivo_binario, logger):
                 dato_2 = datos_crudos[:, :, j * 3 + 2].flatten()
                 dato_3 = datos_crudos[:, :, j * 3 + 3].flatten()
 
-                xValue = ((dato_1.astype(np.uint32) << 12) & 0xFF000) + ((dato_2.astype(np.uint32) << 4) & 0xFF0) + ((dato_3.astype(np.uint32) >> 4) & 0xF)
+                xValue = ((dato_1.astype(np.uint32) << 12) & 0xFF000) + \
+                         ((dato_2.astype(np.uint32) << 4) & 0xFF0) + \
+                         ((dato_3.astype(np.uint32) >> 4) & 0xF)
 
                 # Convertir xValue a int32 para manejar valores negativos
                 xValue = xValue.astype(np.int32)
-
                 mask = xValue >= 0x80000
-                #xValue[mask] = xValue[mask] & 0x7FFFF
                 xValue[mask] = -1 * ((~xValue[mask] + 1) & 0x7FFFF)
 
                 datos[j].extend(xValue)
@@ -83,6 +90,16 @@ def leer_archivo_binario(archivo_binario, logger):
     tiempos_np = np.array(tiempos)
     segundos_faltantes = []
     dif_segundos = np.diff(tiempos_np)
+
+
+    # Validación de saltos anómalos
+    saltos_grandes = dif_segundos[dif_segundos > 1]
+    if len(saltos_grandes) > 0:
+         top5 = [int(x) for x in sorted(saltos_grandes)[-5:]]
+         total_faltantes = sum(int(x - 1) for x in saltos_grandes)
+         logger.warning(f"Detectados {len(saltos_grandes)} saltos mayores a 1 segundo (total {total_faltantes} segundos faltantes). Top 5: {top5}")
+
+
     missing_indices = np.where(dif_segundos > 1)[0]
     for idx in missing_indices:
         segundos_faltantes.extend(range(tiempos_np[idx] + 1, tiempos_np[idx + 1]))
@@ -93,12 +110,11 @@ def leer_archivo_binario(archivo_binario, logger):
     # Imprimir primeros y últimos elementos de tiempos_np y segundos_faltantes
     print(f"Primer elemento de tiempos_np: {tiempos_np[0]}")
     print(f"Último elemento de tiempos_np: {tiempos_np[-1]}")
-
     print(f"Tiempo primer elemento: {tiempo_incio}")
     print(f"Tiempo ultimo elemento: {tiempo_final}")
 
     if segundos_faltantes:
-        logger.warning(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}. Segundos faltantes: {len(segundos_faltantes)}")
+        logger.warning(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
     else:
         logger.info(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
 
