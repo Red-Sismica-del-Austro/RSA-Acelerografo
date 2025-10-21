@@ -64,7 +64,7 @@ All configuration files are in JSON format in the `configuration/` directory:
 - See `crontab.txt` for scheduled tasks
 
 ### Cron Jobs
-- Every 5 minutes: Restart continuous recording
+- Every 60 minutes: Restart continuous recording
 - `@reboot`: Reset hardware, upload pending files, start recording
 
 ## Build System

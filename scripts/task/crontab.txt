@@ -1,6 +1,6 @@
 # Reinicia el registro continuo cada x horas: 
 #0 */6 * * * /usr/local/bin/registrocontinuo restart
-*/5 * * * * /usr/local/bin/registrocontinuo restart
+0 * * * * /usr/local/bin/registrocontinuo restart
 
 # Resetea el circuito al iniciar el sistem:
 @reboot sleep 30 && /usr/local/bin/resetmaster
