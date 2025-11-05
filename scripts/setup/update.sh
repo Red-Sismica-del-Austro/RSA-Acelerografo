@@ -87,7 +87,7 @@ function update_task_scripts {
 update_crontab_if_changed
 
 # Revisar y actualizar archivos en configuración, mqtt, mseed, drive
-update_files_if_changed "$PROJECT_GIT_ROOT/configuration/" "$PROJECT_LOCAL_ROOT/configuracion/"
+#update_files_if_changed "$PROJECT_GIT_ROOT/configuration/" "$PROJECT_LOCAL_ROOT/configuracion/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mqtt/" "$PROJECT_LOCAL_ROOT/scripts/mqtt/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mseed/" "$PROJECT_LOCAL_ROOT/scripts/mseed/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/drive/" "$PROJECT_LOCAL_ROOT/scripts/drive/"
