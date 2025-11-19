@@ -1,4 +1,11 @@
 #!/bin/bash
+set -euo pipefail  # Modo seguro: salir en error, variables no definidas, errores en pipes
+
+# Validar que las variables requeridas estén definidas
+if [ -z "${PROJECT_GIT_ROOT:-}" ] || [ -z "${PROJECT_LOCAL_ROOT:-}" ]; then
+    echo "ERROR: Las variables PROJECT_GIT_ROOT y PROJECT_LOCAL_ROOT deben estar definidas"
+    exit 1
+fi
 
 echo "Usando la ruta del repositorio Git: $PROJECT_GIT_ROOT"
 echo "Usando la ruta del proyecto local: $PROJECT_LOCAL_ROOT"
@@ -39,10 +46,10 @@ cp $PROJECT_GIT_ROOT/configuration/configuracion_mqtt.json $PROJECT_LOCAL_ROOT/c
 cp $PROJECT_GIT_ROOT/configuration/configuracion_mseed.json $PROJECT_LOCAL_ROOT/configuracion/
 
 # Copiar los scripts de Python del proyecto en Git al proyecto local
-cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente*.py $PROJECT_LOCAL_ROOT/scripts/mqtt/cliente.py
-cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed*.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
-cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo*.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_archivo.py
-cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_pendientes_drive*.py $PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py
+cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente.py $PROJECT_LOCAL_ROOT/scripts/mqtt/cliente.py
+cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
+cp $PROJECT_GIT_ROOT/scripts/operation/mseed/extract_segment.py $PROJECT_LOCAL_ROOT/scripts/mseed/extract_segment.py
+cp $PROJECT_GIT_ROOT/scripts/operation/drive/gestor_archivos_acq.py $PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py
 
 # Copiar el task-script crontab.txt al directorio de proyectos
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
@@ -56,14 +63,13 @@ sudo supervisorctl reread
 sudo supervisorctl update
 sudo supervisorctl start mqttcliente
 
-# Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh 
+# Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do
     script_name=$(basename "$script" .sh)
     sudo cp "$script" "/usr/local/bin/$script_name"
+    # Conceder permisos de ejecución solo al script copiado
+    sudo chmod +x "/usr/local/bin/$script_name"
 done
-
-# Conceder permisos de ejecución a los task-scripts
-sudo chmod +x /usr/local/bin/*
 
 # Crear un crontab con permiso de superusuario usando el contenido del archivo crontab.txt
 sudo crontab $PROJECT_GIT_ROOT/scripts/task/crontab.txt
