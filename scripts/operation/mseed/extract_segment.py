@@ -18,9 +18,6 @@ import re
 DEFAULT_INPUT_DIR = "/home/rsa/projects/acelerografo/resultados/mseed"
 DEFAULT_OUTPUT_DIR = "/home/rsa/projects/acelerografo/resultados/eventos-extraidos"
 
-# Zona horaria local (UTC offset en horas)
-LOCAL_UTC_OFFSET = -5  # UTC-5
-
 
 # ============================================================================
 # FUNCIONES AUXILIARES
@@ -28,10 +25,10 @@ LOCAL_UTC_OFFSET = -5  # UTC-5
 
 def parse_start_time(start_str):
     """
-    Parsea el tiempo de inicio soportando formato ISO con 'T' (local) o 'Z' (UTC).
+    Parsea el tiempo de inicio en formato ISO UTC.
 
     Args:
-        start_str: String en formato ISO (e.g., "2024-01-15T14:30:45.250" o "2024-01-15Z14:30:45.250")
+        start_str: String en formato ISO UTC (e.g., "2024-01-15Z14:30:45.250")
 
     Returns:
         tuple: (UTCDateTime objeto, datetime objeto en UTC)
@@ -39,44 +36,25 @@ def parse_start_time(start_str):
     Raises:
         ValueError: Si el formato es inválido
     """
-    # Detectar si usa 'T' (local) o 'Z' (UTC)
-    if 'T' in start_str and 'Z' not in start_str:
-        # Tiempo local - convertir a UTC
-        # Reemplazar 'T' por espacio para parsear
-        time_str = start_str.replace('T', ' ')
-
-        # Parsear el datetime local
-        try:
-            # Intentar con milisegundos
-            local_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f")
-        except ValueError:
-            try:
-                # Intentar sin milisegundos
-                local_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                raise ValueError(f"Formato de tiempo inválido: {start_str}")
-
-        # Convertir a UTC (restar el offset local)
-        utc_dt = local_dt - timedelta(hours=LOCAL_UTC_OFFSET)
-
-    elif 'Z' in start_str:
-        # Tiempo UTC - usar directamente
-        time_str = start_str.replace('Z', ' ')
-
-        try:
-            # Intentar con milisegundos
-            utc_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f")
-        except ValueError:
-            try:
-                # Intentar sin milisegundos
-                utc_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                raise ValueError(f"Formato de tiempo inválido: {start_str}")
-    else:
+    # Verificar que use formato UTC (Z)
+    if 'Z' not in start_str:
         raise ValueError(
             f"Formato de tiempo inválido: {start_str}. "
-            "Use 'T' para hora local o 'Z' para UTC (e.g., '2024-01-15T14:30:45.250' o '2024-01-15Z14:30:45.250')"
+            "Use formato UTC con 'Z' (e.g., '2024-01-15Z14:30:45.250')"
         )
+
+    # Tiempo UTC - reemplazar 'Z' por espacio para parsear
+    time_str = start_str.replace('Z', ' ')
+
+    try:
+        # Intentar con milisegundos
+        utc_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        try:
+            # Intentar sin milisegundos
+            utc_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            raise ValueError(f"Formato de tiempo inválido: {start_str}")
 
     return UTCDateTime(utc_dt), utc_dt
 
@@ -259,19 +237,19 @@ def main():
         epilog="""
 Ejemplos de uso:
 
-  # Extraer usando hora local (T)
-  python extract_segment.py --start "2024-01-15T14:30:45.250" --duration 60
-
-  # Extraer usando hora UTC (Z)
+  # Extraer segmento usando hora UTC
   python extract_segment.py --start "2024-01-15Z19:30:45.250" --duration 60
 
   # Especificar directorios personalizados
   python extract_segment.py --input /data/mseed --output /data/output \\
-      --start "2024-01-15T14:30:45.250" --duration 60
+      --start "2024-01-15Z19:30:45.250" --duration 60
+
+  # Especificar archivo de salida específico
+  python extract_segment.py --start "2024-01-15Z19:30:45.250" --duration 60 \\
+      --output /data/output/evento_001.mseed
 
 Notas:
-  - Use 'T' en --start para hora local (UTC-5)
-  - Use 'Z' en --start para hora UTC
+  - El tiempo debe especificarse en formato UTC con 'Z' (e.g., '2024-01-15Z14:30:45.250')
   - Los archivos deben seguir el formato: STATIONID_YYYYMMDD_HHMMSS.mseed
   - La duración se especifica en segundos (puede incluir decimales)
   - El archivo de salida mantiene el formato del archivo de entrada con la hora de inicio actualizada
@@ -283,7 +261,7 @@ Notas:
     parser.add_argument(
         '--start', '-s',
         required=True,
-        help='Tiempo de inicio en formato ISO (e.g., "2024-01-15T14:30:45.250" para local o "2024-01-15Z14:30:45.250" para UTC)'
+        help='Tiempo de inicio en formato ISO UTC (e.g., "2024-01-15Z14:30:45.250")'
     )
 
     parser.add_argument(
