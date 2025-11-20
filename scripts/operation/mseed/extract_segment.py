@@ -12,12 +12,6 @@ from pathlib import Path
 from obspy import read, UTCDateTime
 import re
 
-# ============================================================================
-# CONFIGURACIÓN: Directorios por defecto
-# ============================================================================
-DEFAULT_INPUT_DIR = "/home/rsa/projects/acelerografo/resultados/mseed"
-DEFAULT_OUTPUT_DIR = "/home/rsa/projects/acelerografo/resultados/eventos-extraidos"
-
 
 # ============================================================================
 # FUNCIONES AUXILIARES
@@ -231,6 +225,18 @@ def extract_segment(input_file, output_file, start_time_utc, duration):
 # ============================================================================
 
 def main():
+    # ============================================================================
+    # CONFIGURACIÓN: Directorios por defecto
+    # ============================================================================
+    # Variable de entorno
+    project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
+    if not project_local_root:
+        print("La variable de entorno PROJECT_LOCAL_ROOT no está definida.")
+        return 1
+
+    default_input_dir = os.path.join(project_local_root, "resultados", "mseed")
+    default_output_dir = os.path.join(project_local_root, "resultados", "eventos-extraidos")
+
     parser = argparse.ArgumentParser(
         description="Extrae un segmento temporal de archivos miniSEED organizados por fecha.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -274,14 +280,14 @@ Notas:
     # Argumentos opcionales
     parser.add_argument(
         '--input', '-i',
-        default=DEFAULT_INPUT_DIR,
-        help=f'Directorio con archivos miniSEED de entrada (default: {DEFAULT_INPUT_DIR})'
+        default=default_input_dir,
+        help=f'Directorio con archivos miniSEED de entrada (default: {default_input_dir})'
     )
 
     parser.add_argument(
         '--output', '-o',
         default=None,
-        help='Ruta del archivo de salida o directorio (default: auto-generado con formato STATIONID_YYYYMMDD_HHMMSS.mseed en DEFAULT_OUTPUT_DIR)'
+        help=f'Ruta del archivo de salida o directorio (default: auto-generado con formato STATIONID_YYYYMMDD_HHMMSS.mseed en {default_output_dir})'
     )
 
     args = parser.parse_args()
@@ -308,8 +314,8 @@ Notas:
                 output_file = args.output
         else:
             # Usar directorio por defecto con nombre generado
-            os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
-            output_file = os.path.join(DEFAULT_OUTPUT_DIR, output_filename)
+            os.makedirs(default_output_dir, exist_ok=True)
+            output_file = os.path.join(default_output_dir, output_filename)
 
         # Crear directorio de salida si no existe
         os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
