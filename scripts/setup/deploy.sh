@@ -78,4 +78,9 @@ sudo crontab $PROJECT_GIT_ROOT/scripts/task/crontab.txt
 cd $PROJECT_GIT_ROOT/scripts/setup/
 make
 
+# Asegurar que los archivos de log tengan permisos correctos
+# (necesario porque el crontab de root puede crearlos después)
+sudo chown $USER:$USER $PROJECT_LOCAL_ROOT/log-files/*.log 2>/dev/null || true
+chmod 664 $PROJECT_LOCAL_ROOT/log-files/*.log 2>/dev/null || true
+
 echo "Despliegue completado con éxito."
