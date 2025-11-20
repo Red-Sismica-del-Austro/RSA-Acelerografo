@@ -16,6 +16,8 @@
     },
     "drive": {
         "registro_continuo": "token_registro_continuo",
-        "eventos_extraidos": "token_eventos_extraidos"
+        "eventos_extraidos": "token_eventos_extraidos",
+        "max_reintentos": 5,
+        "tiempo_espera": 2
     }
 }
