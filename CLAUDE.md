@@ -30,6 +30,10 @@ bash menu.sh  # Select option 3
 
 All configuration files are in JSON format in the `configuration/` directory:
 - `configuracion_dispositivo.json`: Device ID, directories, operation mode (online/offline), Drive tokens
+  - **New parameters** (optional, have defaults):
+    - `umbral_espacio_minimo`: Minimum free disk space threshold for file cleanup
+    - `max_reintentos`: Maximum retry attempts for Drive uploads (default: 5)
+    - `tiempo_espera`: Wait time between retries in seconds (default: 2)
 - `configuracion_mseed.json`: Station metadata (coordinates, sampling rate, network code, etc.)
 - `configuracion_mqtt.json`: MQTT broker settings for event publishing
 
@@ -53,10 +57,20 @@ All configuration files are in JSON format in the `configuration/` directory:
 - Custom libraries: `detector_eventos.c`, `lector_json.c`
 
 **Python Scripts**:
-- `scripts/operation/mseed/binary_to_mseed_2.1.1.py`: Converts binary to Mini-SEED
+- `scripts/operation/mseed/binary_to_mseed.py` (formerly `binary_to_mseed_2.1.1.py`): Converts binary to Mini-SEED
   - Handles missing samples (gaps), invalid timestamps
   - Supports 3 modes: `--modo rc` (continuous), `--modo ee` (event), `--modo archivo --nombre <file>`
+- `scripts/operation/mseed/extract_segment.py`: Extracts temporal segments from Mini-SEED files
+  - CLI tool for extracting specific time windows from hourly Mini-SEED files organized by date
+  - Uses UTC format exclusively (format: `YYYY-MM-DDZHH:MM:SS.fff`)
+  - Automatic file search by date and time range
+  - Maintains original filename format in output
+  - Supports all available channels and FLOAT32/STEIM2 encodings
 - `scripts/operation/drive/gestor_archivos_acq.py`: File lifecycle manager
+  - Configurable disk space threshold via `umbral_espacio_minimo` in JSON (default behavior maintained)
+  - Configurable retry parameters: `max_reintentos` and `tiempo_espera` in device configuration
+  - Enhanced logging with exact free space percentages
+  - Fixed socket closure in internet connectivity checks to prevent memory leaks
 - `scripts/operation/mqtt/cliente.py`: MQTT client for status/event publishing
 
 **Task Scripts** (in `scripts/task/`):
@@ -82,7 +96,14 @@ Executables are placed in `$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/
 
 ### Manual file conversion
 ```bash
-python3 scripts/operation/mseed/binary_to_mseed_2.1.1.py --modo archivo --nombre <filename.dat>
+python3 scripts/operation/mseed/binary_to_mseed.py --modo archivo --nombre <filename.dat>
+```
+
+### Extract temporal segments from Mini-SEED files
+```bash
+python3 scripts/operation/mseed/extract_segment.py --start "2024-01-15Z14:30:45.250" --duration 60
+# Extracts 60 seconds starting from the specified UTC time
+# Note: Time format must use UTC (Z) format: YYYY-MM-DDZHH:MM:SS.fff
 ```
 
 ### Control continuous recording
@@ -123,3 +144,24 @@ Each logger is identified by station ID from `configuracion_dispositivo.json`.
 - Binary data format: 2506-byte frames (2500 bytes data + 6 bytes timestamp)
 - Sampling rate typically 250 Hz, 3 channels (X, Y, Z)
 - Mini-SEED uses STEIM1 compression, record length 512 bytes
+
+## Recent Updates
+
+### Security and Deployment Improvements (Nov 2025)
+- `deploy.sh` now includes strict error handling (`set -euo pipefail`)
+- Environment variable validation added to prevent partial installations
+- Fixed critical permissions issue: log files now have correct ownership after deployment
+- Removed wildcards in Python script copying for better precision
+- `extract_segment.py` added to deployment process
+
+### File Management Enhancements (Nov 2025)
+- `gestor_archivos_acq.py` now supports configurable parameters via JSON
+- Enhanced logging with detailed space usage information
+- Memory leak fix: proper socket closure in connectivity checks
+- Better error handling with stdout/stderr capture in subprocesses
+
+### New Tool: extract_segment.py (Nov 2025)
+- Added CLI tool for extracting temporal segments from Mini-SEED archives
+- Uses UTC-only time format for consistency (no local time conversions)
+- Automatically searches files by date and time range
+- Supports PROJECT_LOCAL_ROOT environment variable for portability
