@@ -37,7 +37,9 @@ def get_free_space_percentage(path):
 def check_internet_connection(logger, host="8.8.8.8", port=53, timeout=3):
     try:
         socket.setdefaulttimeout(timeout)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((host, port))
+        sock.close()
         logger.info("Conexión a internet verificada.")
         return True
     except Exception as e:
@@ -117,6 +119,9 @@ def main():
     mode_acq = config_dispositivo.get("dispositivo", {}).get("modo_adquisicion", "Unknown")
     id_estacion = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
 
+    # Obtener umbral de espacio libre mínimo (por defecto 10%)
+    min_free_space_threshold = config_dispositivo.get("dispositivo", {}).get("umbral_espacio_minimo", 10)
+
     # Inicializa el logger
     logger = obtener_logger(id_estacion, log_directory, "gestor_acq.log")
     
@@ -152,35 +157,52 @@ def main():
 
         # Verificar espacio disponible en la partición donde se encuentra el directorio mseed
         free_space = get_free_space_percentage(mseed_directory)
-        if free_space < 10:
-            logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar el archivo mseed más antiguo.")
+        logger.info(f"Espacio libre en directorio mseed: {free_space:.2f}%")
+        if free_space < min_free_space_threshold:
+            logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo mseed más antiguo.")
             delete_oldest_file(mseed_directory, ".mseed", logger)
     
     elif mode_acq == "online":
         logger.info("Modo online activado.")
         if check_internet_connection(logger):
-            #logger.info("Conexión a internet establecida. Se procederá a subir los archivos mseed a Google Drive.")
+            logger.info("Conexión a internet establecida. Se procederá a subir los archivos mseed a Google Drive.")
             if archivos_mseed:
+                # Obtener parámetros de subida desde configuración (por defecto: max_reintentos=3, tiempo_espera=1)
+                max_reintentos = str(config_dispositivo.get("drive", {}).get("max_reintentos", 3))
+                tiempo_espera = str(config_dispositivo.get("drive", {}).get("tiempo_espera", 1))
+
                 for archivo in archivos_mseed:
-                    #logger.info(f"Subiendo el archivo: {archivo}")
-                    result = subprocess.run(["python3", script_subir_archivo_drive, archivo, "3", "1"])
-                    if result.returncode != 0:
+                    logger.info(f"Subiendo el archivo: {archivo}")
+                    result = subprocess.run(
+                        ["python3", script_subir_archivo_drive, archivo, max_reintentos, tiempo_espera],
+                        capture_output=True,
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        logger.info(f"Archivo {archivo} subido exitosamente a Google Drive.")
+                        if result.stdout:
+                            logger.debug(f"Salida: {result.stdout.strip()}")
+                    else:
                         logger.error(f"Error al subir el archivo {archivo}. Código de retorno: {result.returncode}")
+                        if result.stderr:
+                            logger.error(f"Error: {result.stderr.strip()}")
             else:
                 logger.warning("No se encontraron archivos mseed en el directorio especificado.")
         else:
-             # Si no hay conexion a internet verifica el espacio disponible 
+             # Si no hay conexion a internet verifica el espacio disponible
             free_space = get_free_space_percentage(mseed_directory)
-            if free_space < 10:
-                logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar el archivo mseed más antiguo.")
+            logger.info(f"Espacio libre en directorio mseed: {free_space:.2f}%")
+            if free_space < min_free_space_threshold:
+                logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo mseed más antiguo.")
                 delete_oldest_file(mseed_directory, ".mseed", logger)
             else:
                 logger.info("Espacio disponible suficiente en la partición.")
 
         # Verificar espacio disponible en el directorio de archivos binarios
         free_space = get_free_space_percentage(binary_directory)
-        if free_space < 10:
-            logger.warning("El espacio disponible es menor al 10%. Se procederá a borrar el archivo binario más antiguo.")
+        logger.info(f"Espacio libre en directorio binarios: {free_space:.2f}%")
+        if free_space < min_free_space_threshold:
+            logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo binario más antiguo.")
             delete_oldest_file(binary_directory, ".dat", logger)
         else:
             logger.info("Espacio disponible suficiente en la partición.")
