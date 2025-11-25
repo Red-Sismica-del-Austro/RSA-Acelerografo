@@ -4,7 +4,53 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an accelerograph (acelerógrafo) data acquisition and monitoring system for seismic stations. It runs on Raspberry Pi devices, continuously records acceleration data in binary format, converts it to Mini-SEED format, and can upload data to Google Drive. The system supports both online (with internet) and offline modes.
+This is a **seismograph data acquisition system** designed for continuous seismic monitoring. The system uses a **dsPIC33EP microcontroller** interfaced with an **ADXL355 accelerometer** (250 Hz sampling, 3 axes) to capture acceleration data, which is then transferred to a **Raspberry Pi** via SPI for processing, storage, and optional cloud backup.
+
+### System Architecture
+
+```
+ADXL355 Sensor (250Hz) → dsPIC33EP Firmware → SPI → Raspberry Pi
+                                                        ↓
+                                              registro_continuo.c
+                                                        ↓
+                                              .dat binary files
+                                                        ↓
+                                              binary_to_mseed.py
+                                                        ↓
+                                              .mseed files (STEIM1)
+                                                        ↓
+                                              gestor_archivos_acq.py
+                                                        ↓
+                                              Google Drive (online mode)
+```
+
+### Key Capabilities
+- **Continuous recording**: 24/7 data acquisition with hourly file rotation
+- **Event detection**: STA/LTA algorithm for seismic event identification
+- **Standard format**: Mini-SEED output with FDSN metadata compliance
+- **Dual mode operation**: Online (cloud backup) and offline (local storage)
+- **Real-time streaming**: Named pipe (`/tmp/my_pipe`) for live data access
+- **Automated orchestration**: Cron-based system management with hourly restarts
+
+### Technical Specifications
+- **Sampling rate**: 250 Hz (configurable)
+- **Channels**: 3 (Z, N, E for vertical, north, east)
+- **Data format**: Binary .dat (proprietary) → Mini-SEED (standard)
+- **Compression**: STEIM1 for efficient storage
+- **Time synchronization**: GPS + DS3234 RTC on dsPIC
+- **Event detection**: STA=125 samples (0.5s), LTA=12500 samples (50s), trigger=4.0, detrigger=2.0
+
+## Detailed Documentation
+
+For in-depth technical information about each component, refer to these context files:
+
+- **[Firmware (dsPIC33EP)](docs/context/firmware_context.md)** - Microcontroller firmware, sensor interface, time synchronization
+- **[Main Acquisition (registro_continuo)](docs/context/registro_continuo_context.md)** - C program on RPi, SPI communication, event detection
+- **[Format Conversion (binary_to_mseed)](docs/context/binary_to_mseed_context.md)** - Binary to Mini-SEED conversion, STEIM1 compression
+- **[File Management (gestor_archivos_acq)](docs/context/gestor_archivos_acq_context.md)** - Google Drive integration, disk space management
+- **[System Orchestration (registrocontinuo.sh)](docs/context/orquestador_rc_context.md)** - Service control, cron jobs, boot sequence
+- **[Diagnostics (comprobar_registro)](docs/context/comprobar_registro_context.md)** - Status checking, debugging tools
+- **[Event Extraction](docs/context/extraer_evento_context.md)** - Extracting event windows from continuous data
 
 ## Environment Setup
 
