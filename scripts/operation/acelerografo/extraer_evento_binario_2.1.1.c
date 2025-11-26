@@ -150,8 +150,13 @@ void RecuperarVector(struct datos_config *config)
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Abre el archivo binario en modo lectura:
-	printf("Abriendo archivo registro continuo");
+	printf("Abriendo archivo registro continuo: %s\n", filenameArchivoRegistroContinuo);
 	lf = fopen(filenameArchivoRegistroContinuo, "rb");
+
+	if (lf == NULL) {
+		fprintf(stderr, "Error: No se pudo abrir el archivo %s\n", filenameArchivoRegistroContinuo);
+		return;
+	}
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -159,10 +164,48 @@ void RecuperarVector(struct datos_config *config)
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	fread(tramaDatos, sizeof(char), tramaSize, lf);
 	tiempoInicio = (tramaDatos[tramaSize - 3] * 3600) + (tramaDatos[tramaSize - 2] * 60) + (tramaDatos[tramaSize - 1]);
-	// tiempoEvento = ((horaEvento/10000)*3600)+(((horaEvento%10000)/100)*60)+(horaEvento%100);
 	tiempoEvento = horaEvento;
 	tiempoTranscurrido = tiempoEvento - tiempoInicio;
-	// printf("%d",tiempoEvento);
+
+	// Validación: verificar si el tiempo solicitado es anterior al inicio del archivo
+	if (tiempoEvento < tiempoInicio) {
+		fprintf(stderr, "\nError: El tiempo solicitado (%d segundos) es anterior al inicio del archivo (%d segundos)\n",
+		        tiempoEvento, tiempoInicio);
+		fprintf(stderr, "Tiempo solicitado: %02d:%02d:%02d\n",
+		        tiempoEvento/3600, (tiempoEvento%3600)/60, tiempoEvento%60);
+		fprintf(stderr, "Inicio del archivo: %02d:%02d:%02d\n",
+		        tiempoInicio/3600, (tiempoInicio%3600)/60, tiempoInicio%60);
+		fclose(lf);
+		return;
+	}
+
+	// Obtener el tamaño del archivo para validar el tiempo final
+	fseek(lf, 0, SEEK_END);
+	long tamanioArchivo = ftell(lf);
+	long numeroTramas = tamanioArchivo / tramaSize;
+	unsigned int tiempoFinal = tiempoInicio + numeroTramas - 1;
+	fseek(lf, 0, SEEK_SET);
+	fread(tramaDatos, sizeof(char), tramaSize, lf); // Volver a leer la primera trama
+
+	// Validación: verificar si el evento completo cabe en el archivo
+	unsigned int tiempoFinEvento = tiempoEvento + duracionEvento;
+	if (tiempoFinEvento > tiempoFinal) {
+		fprintf(stderr, "\nError: El evento solicitado excede el final del archivo\n");
+		fprintf(stderr, "Tiempo inicio evento: %02d:%02d:%02d (%d segundos)\n",
+		        tiempoEvento/3600, (tiempoEvento%3600)/60, tiempoEvento%60, tiempoEvento);
+		fprintf(stderr, "Duracion evento: %d segundos\n", duracionEvento);
+		fprintf(stderr, "Tiempo fin evento: %02d:%02d:%02d (%d segundos)\n",
+		        tiempoFinEvento/3600, (tiempoFinEvento%3600)/60, tiempoFinEvento%60, tiempoFinEvento);
+		fprintf(stderr, "Tiempo final disponible: %02d:%02d:%02d (%d segundos)\n",
+		        tiempoFinal/3600, (tiempoFinal%3600)/60, tiempoFinal%60, tiempoFinal);
+		fclose(lf);
+		return;
+	}
+
+	printf("Rango valido - Inicio: %02d:%02d:%02d, Fin: %02d:%02d:%02d (Total: %ld segundos)\n",
+	       tiempoInicio/3600, (tiempoInicio%3600)/60, tiempoInicio%60,
+	       tiempoFinal/3600, (tiempoFinal%3600)/60, tiempoFinal%60,
+	       numeroTramas);
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
