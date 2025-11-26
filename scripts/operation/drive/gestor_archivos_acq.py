@@ -97,23 +97,32 @@ def main():
     
     # Definir rutas de archivos y directorios
     script_subir_archivo_drive = os.path.join(project_local_root, "scripts", "drive", "subir_archivo.py")
-    mseed_directory = os.path.join(project_local_root, "resultados", "mseed")
-    binary_directory = os.path.join(project_local_root, "resultados", "registro-continuo")
     config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
     log_directory = os.path.join(project_local_root, "log-files")
-    
+
+    # Lee el archivo de configuración del dispositivo
+    config_dispositivo = read_fileJSON(config_dispositivo_path)
+    if config_dispositivo is None:
+        logging.error("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
+        return
+
+    # Obtener rutas desde configuracion_dispositivo.json
+    mseed_directory = config_dispositivo.get("directorios", {}).get("archivos_mseed", "")
+    binary_directory = config_dispositivo.get("directorios", {}).get("registro_continuo", "")
+
+    if not mseed_directory:
+        logging.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+        return
+    if not binary_directory:
+        logging.error("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+        return
+
     # Verificar que los directorios existen
     if not os.path.isdir(mseed_directory):
         logging.error(f"El directorio mseed no existe: {mseed_directory}")
         return
     if not os.path.isdir(binary_directory):
         logging.error(f"El directorio de archivos binarios no existe: {binary_directory}")
-        return
-
-    # Lee el archivo de configuración del dispositivo
-    config_dispositivo = read_fileJSON(config_dispositivo_path)
-    if config_dispositivo is None:
-        logging.error("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
         return
     
     mode_acq = config_dispositivo.get("dispositivo", {}).get("modo_adquisicion", "Unknown")
