@@ -7,7 +7,7 @@ Este documento describe el programa `extraer_evento_binario_2.1.1.c`, una herram
 **Autor**: Milton Muñoz
 **Fecha de creación**: 24/03/2021
 **Ubicación**: `/home/rsa/git/montajes/acelerografo/scripts/operation/acelerografo/`
-**Versión**: 2.1.1
+**Versión**: 2.1.1 (migrado a configuración JSON)
 **Lenguaje**: C (código para Raspberry Pi)
 **Propósito**: Extracción de ventanas temporales específicas de archivos de registro continuo para análisis detallado de eventos sísmicos
 
@@ -291,23 +291,45 @@ RecuperarVector()
 
 ## Análisis Detallado por Secciones
 
-### Sección 1: Parseo de Argumentos (main)
+### Sección 1: Parseo de Argumentos y Carga de Configuración (main)
 
 ```c
 int main(int argc, char *argv[]) {
-    // argv[1]: Nombre del archivo (ej: "CHA01_250121-143025.dat")
+    // 1. Obtener PROJECT_LOCAL_ROOT y cargar configuración JSON
+    const char *project_local_root = getenv("PROJECT_LOCAL_ROOT");
+    if (project_local_root == NULL) {
+        fprintf(stderr, "Error: La variable de entorno PROJECT_LOCAL_ROOT no está configurada.\n");
+        return 1;
+    }
+
+    static char config_path[256];
+    snprintf(config_path, sizeof(config_path), "%s/configuracion/configuracion_dispositivo.json", project_local_root);
+
+    struct datos_config *config = compilar_json(config_path);
+    if (config == NULL) {
+        fprintf(stderr, "Error al leer el archivo de configuracion JSON.\n");
+        return 1;
+    }
+
+    // 2. argv[1]: Nombre del archivo (ej: "CHA01_250121-143025.dat")
     strcpy(nombreArchivo, argv[1]);
 
-    // Construye ruta hardcoded
-    strcpy(filenameArchivoRegistroContinuo, "/home/rsa/resultados/registro-continuo/");
+    // 3. Construye ruta desde configuración JSON
+    strcpy(filenameArchivoRegistroContinuo, config->registro_continuo);
     strcat(filenameArchivoRegistroContinuo, nombreArchivo);
-    // Resultado: /home/rsa/resultados/registro-continuo/CHA01_250121-143025.dat
+    // Resultado: {config->registro_continuo}/CHA01_250121-143025.dat
 
-    // argv[2]: Hora del evento en segundos desde medianoche
+    // 4. argv[2]: Hora del evento en segundos desde medianoche
     horaEvento = atoi(argv[2]);  // Ej: "52535" → 52535
 
-    // argv[3]: Duración del evento en segundos
+    // 5. argv[3]: Duración del evento en segundos
     duracionEvento = atoi(argv[3]);  // Ej: "30" → 30
+
+    // 6. Ejecuta extracción
+    RecuperarVector(config);
+
+    // 7. Libera memoria
+    free(config);
 }
 ```
 
@@ -316,12 +338,12 @@ int main(int argc, char *argv[]) {
 $ extraer_evento_binario_2.1.1 CHA01_250121-143025.dat 52535 30
 
 Argumentos parseados:
-- Archivo: /home/rsa/resultados/registro-continuo/CHA01_250121-143025.dat
+- Archivo: {registro_continuo desde JSON}/CHA01_250121-143025.dat
 - Hora evento: 52535 segundos (14:35:35)
 - Duración: 30 segundos
 ```
 
-**Limitación**: La ruta está hardcoded (`/home/rsa/resultados/registro-continuo/`). Debería usar variable de entorno o leer de configuración.
+**Mejora implementada**: Ahora usa configuración JSON portable. La ruta se lee desde `configuracion_dispositivo.json`.
 
 ### Sección 2: Cálculo de Offset Temporal
 
@@ -437,84 +459,49 @@ fread(tramaDatos, sizeof(char), tramaSize, lf);
 ### Sección 5: Creación del Archivo de Salida
 
 ```c
-void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro) {
-    // 1. Lee configuración (hardcoded path)
-    ficheroDatosConfiguracion = fopen("/home/rsa/configuracion/DatosConfiguracion.txt", "rt");
-    fgets(idEstacion, 10, ficheroDatosConfiguracion);  // Primera línea: ID
+void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro, struct datos_config *config) {
+    // 1. Extrae timestamp de la primera trama del evento
+    unsigned char dd = tramaRegistro[tramaSize - 6];   // día
+    unsigned char mm = tramaRegistro[tramaSize - 5];   // mes
+    unsigned char aa = tramaRegistro[tramaSize - 4];   // año (2 dígitos)
+    unsigned char hh = tramaRegistro[tramaSize - 3];   // hora
+    unsigned char min = tramaRegistro[tramaSize - 2];  // minuto
+    unsigned char ss = tramaRegistro[tramaSize - 1];   // segundo
 
-    // Salta 4 líneas para llegar a la quinta (pathEventosExtraidos)
-    for (i = 0; i < 4; i++) {
-        fgets(pathEventosExtraidos, 60, ficheroDatosConfiguracion);
-    }
-    fclose(ficheroDatosConfiguracion);
+    // 2. Calcula el año completo (asume 20xx para años < 70, 19xx para >= 70)
+    unsigned int anio_completo = (aa < 70) ? (2000 + aa) : (1900 + aa);
 
-    // Elimina caracteres de fin de línea
-    strtok(idEstacion, "\n");
-    strtok(pathEventosExtraidos, "\n");
-    strtok(idEstacion, "\r");
-    strtok(pathEventosExtraidos, "\r");
-}
-```
+    // 3. Formato mejorado: ID_AAAAMMDD_hhmmss_duracion.dat
+    sprintf(tiempoNodoStr, "%04d%02d%02d_%02d%02d%02d_", anio_completo, mm, dd, hh, min, ss);
+    sprintf(duracionEventoStr, "%03d", duracionEvento);
 
-**Formato del archivo DatosConfiguracion.txt**:
-```
-CHA01
-/path/to/linea2
-/path/to/linea3
-/path/to/linea4
-/path/to/linea5
-/home/rsa/resultados/eventos-extraidos/   ← Quinta línea
-```
-
-**Problema identificado**: El programa lee `pathEventosExtraidos` pero **no lo usa**. El nombre del archivo se construye solo con el ID:
-
-```c
-// Construye nombre del archivo
-strcpy(filenameEventoExtraido, idEstacion);  // Solo usa ID, ignora path
-strcat(filenameEventoExtraido, tiempoNodoStr);
-strcat(filenameEventoExtraido, duracionEventoStr);
-strcat(filenameEventoExtraido, extBin);
-
-// Resultado: CHA01250121-142535_030.dat (sin path, en directorio actual)
-```
-
-**Construcción del nombre de archivo**:
-
-```c
-    // Extrae timestamp de la primera trama del evento
-    tiempoNodo[0] = tramaRegistro[2500];  // año
-    tiempoNodo[1] = tramaRegistro[2501];  // mes
-    tiempoNodo[2] = tramaRegistro[2502];  // día
-    tiempoNodo[3] = tramaRegistro[2503];  // hora
-    tiempoNodo[4] = tramaRegistro[2504];  // minuto
-    tiempoNodo[5] = tramaRegistro[2505];  // segundo
-
-    // Formatea: AAMMDD-HHMMSS_
-    sprintf(tiempoNodoStr, "%0.2d%0.2d%0.2d-%0.2d%0.2d%0.2d_",
-            tiempoNodo[2], tiempoNodo[1], tiempoNodo[0],
-            tiempoNodo[3], tiempoNodo[4], tiempoNodo[5]);
-
-    // Formatea duración: 030
-    sprintf(duracionEventoStr, "%0.3d", duracionEvento);
-
-    // Combina todo
-    strcpy(filenameEventoExtraido, idEstacion);
+    // 4. Construye la ruta completa usando config->eventos_extraidos
+    strcpy(filenameEventoExtraido, config->eventos_extraidos);
+    strcat(filenameEventoExtraido, config->id);
+    strcat(filenameEventoExtraido, "_");
     strcat(filenameEventoExtraido, tiempoNodoStr);
     strcat(filenameEventoExtraido, duracionEventoStr);
     strcat(filenameEventoExtraido, ".dat");
 
-    // Resultado: CHA01250121-142535_030.dat
+    // Resultado: {eventos_extraidos}/ID_AAAAMMDD_hhmmss_duracion.dat
+}
 ```
 
-**Componentes del nombre**:
+**Mejoras implementadas**:
+1. Lee configuración desde JSON (no más DatosConfiguracion.txt)
+2. Usa la ruta completa `config->eventos_extraidos`
+3. Formato de nombre mejorado: `ID_AAAAMMDD_hhmmss_duracion.dat`
+4. Año con 4 dígitos (2024) en lugar de 2 (24)
+
+**Componentes del nombre actual**:
 ```
-CHA01 250121 - 142535 _ 030 .dat
-  ↑     ↑       ↑       ↑    ↑
-  │     │       │       │    └── Extensión
-  │     │       │       └─────── Duración (segundos)
-  │     │       └─────────────── Hora de inicio (HHMMSS)
-  │     └─────────────────────── Fecha (AAMMDD)
-  └───────────────────────────── ID de la estación
+CHA01 _ 20250121 _ 142535 _ 030 .dat
+  ↑       ↑          ↑       ↑    ↑
+  │       │          │       │    └── Extensión
+  │       │          │       └─────── Duración (segundos)
+  │       │          └─────────────── Hora de inicio (hhmmss)
+  │       └────────────────────────── Fecha (AAAAMMDD)
+  └────────────────────────────────── ID de la estación
 ```
 
 ### Sección 6: Guardado de Nombre en Archivo Temporal

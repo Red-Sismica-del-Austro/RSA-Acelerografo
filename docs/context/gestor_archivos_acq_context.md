@@ -287,22 +287,24 @@ def main():
         logging.error("Variable PROJECT_LOCAL_ROOT no definida")
         return
 
-    # 2. Definición de rutas
+    # 2. Definición de rutas base
     script_subir_archivo_drive = os.path.join(project_local_root, "scripts", "drive", "subir_archivo.py")
-    mseed_directory = os.path.join(project_local_root, "resultados", "mseed")
-    binary_directory = os.path.join(project_local_root, "resultados", "registro-continuo")
     config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
 
-    # 3. Verificación de existencia de directorios
-    if not os.path.isdir(mseed_directory):
-        logging.error(f"Directorio mseed no existe: {mseed_directory}")
-        return
-
-    # 4. Carga de configuración
+    # 3. Carga de configuración
     config_dispositivo = read_fileJSON(config_dispositivo_path)
     mode_acq = config_dispositivo.get("dispositivo", {}).get("modo_adquisicion", "Unknown")
     id_estacion = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
     min_free_space_threshold = config_dispositivo.get("dispositivo", {}).get("umbral_espacio_minimo", 10)
+
+    # 4. Obtener rutas de directorios desde configuración JSON
+    mseed_directory = config_dispositivo.get("directorios", {}).get("archivos_mseed", "")
+    binary_directory = config_dispositivo.get("directorios", {}).get("registro_continuo", "")
+
+    # 5. Verificación de existencia de directorios
+    if not os.path.isdir(mseed_directory):
+        logging.error(f"Directorio mseed no existe: {mseed_directory}")
+        return
 
     # 5. Inicialización de logger
     logger = obtener_logger(id_estacion, log_directory, "gestor_acq.log")
