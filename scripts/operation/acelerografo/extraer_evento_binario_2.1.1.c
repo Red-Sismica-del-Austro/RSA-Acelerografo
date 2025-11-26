@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "libraries/lector_json.h"
 
 // Declaracion de constantes
 #define P2 0
@@ -70,21 +71,37 @@ FILE *fileInfo;
 FILE *fileX;
 FILE *fileY;
 FILE *fileZ;
-FILE *ficheroDatosConfiguracion;
 
 // Declaracion de funciones
-void RecuperarVector();
-void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro);
+void RecuperarVector(struct datos_config *config);
+void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro, struct datos_config *config);
 
 int main(int argc, char *argv[])
 {
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Obtener PROJECT_LOCAL_ROOT y cargar configuración JSON
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	const char *project_local_root = getenv("PROJECT_LOCAL_ROOT");
+	if (project_local_root == NULL) {
+		fprintf(stderr, "Error: La variable de entorno PROJECT_LOCAL_ROOT no está configurada.\n");
+		return 1;
+	}
+
+	static char config_path[256];
+	snprintf(config_path, sizeof(config_path), "%s/configuracion/configuracion_dispositivo.json", project_local_root);
+
+	struct datos_config *config = compilar_json(config_path);
+	if (config == NULL) {
+		fprintf(stderr, "Error al leer el archivo de configuracion JSON.\n");
+		return 1;
+	}
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Ingreso de datos
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// strcpy(filenameArchivoRegistroContinuo, argv[1]);
 	strcpy(nombreArchivo, argv[1]);
-	strcpy(filenameArchivoRegistroContinuo, "/home/rsa/resultados/registro-continuo/");
+	strcpy(filenameArchivoRegistroContinuo, config->registro_continuo);
 	strcat(filenameArchivoRegistroContinuo, nombreArchivo);
 
 	horaEvento = atoi(argv[2]);
@@ -115,7 +132,10 @@ int main(int argc, char *argv[])
 
 	banExtraer = 0;
 
-	RecuperarVector();
+	RecuperarVector(config);
+
+	// Liberar memoria de la configuración
+	free(config);
 
 	// Comando para ejecutar el script de Python
 	//const char *comandoPython = "sudo python3 /home/rsa/programas/ConversorMseed.py 2";
@@ -124,7 +144,7 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-void RecuperarVector()
+void RecuperarVector(struct datos_config *config)
 {
 	int ajusteTiempo = 0;
 
@@ -191,7 +211,7 @@ void RecuperarVector()
 		printf("\nExtrayendo...\n");
 
 		// Crea un archivo binario para guardar el evento:
-		CrearArchivo(duracionEvento, tramaDatos);
+		CrearArchivo(duracionEvento, tramaDatos, config);
 
 		// Escritura de datos en los archivo de aceleracion:
 		while (contMuestras < duracionEvento)
@@ -225,61 +245,38 @@ void RecuperarVector()
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 
-void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro)
+void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro, struct datos_config *config)
 {
-
-	// Variables para extraer los datos de configuracion:
-	char idEstacion[10];
-	char pathEventosExtraidos[60];
+	// Variables para crear el nombre del archivo:
+	char tiempoNodoStr[30];
+	char duracionEventoStr[4];
 	char extBin[5];
 
-	// Variables para crear el nombre del archivo:
-	char tiempoNodoStr[25];
-	char duracionEventoStr[4];
-	char tiempoNodo[6];
-
 	// Variables para crear los archivos de datos:
-	char filenameEventoExtraido[30];
-
-	// Se leen los datos de configuracion:
-	printf("Leyendo archivo de configuracion...\n");
-
-	// Abre el fichero de datos de configuracion:
-	ficheroDatosConfiguracion = fopen("/home/rsa/configuracion/DatosConfiguracion.txt", "rt");
-	// Recupera el contenido del archivo en la variable arg1 hasta que encuentra el carácter de fin de línea (\n):
-	fgets(idEstacion, 10, ficheroDatosConfiguracion);
-	for (i = 0; i < 4; i++)
-	{
-		fgets(pathEventosExtraidos, 60, ficheroDatosConfiguracion); // Recupera la quinta fila del archivo de configuracion
-	}
-	// Cierra el fichero de informacion:
-	fclose(ficheroDatosConfiguracion);
-
-	// Elimina el caracter de fin de linea (\n):
-	strtok(idEstacion, "\n");
-	strtok(pathEventosExtraidos, "\n");
-	// Elimina el caracter de retorno de carro (\r):
-	strtok(idEstacion, "\r");
-	strtok(pathEventosExtraidos, "\r");
+	char filenameEventoExtraido[150];
 
 	// Asigna el texto correspondiente a los array de carateres:
 	strcpy(extBin, ".dat");
 
 	// Extrae el tiempo de la trama pyload:
-	tiempoNodo[0] = tramaRegistro[tramaSize - 6]; // dd
-	tiempoNodo[1] = tramaRegistro[tramaSize - 5]; // mm
-	tiempoNodo[2] = tramaRegistro[tramaSize - 4]; // aa
-	tiempoNodo[3] = tramaRegistro[tramaSize - 3]; // hh
-	tiempoNodo[4] = tramaRegistro[tramaSize - 2]; // mm
-	tiempoNodo[5] = tramaRegistro[tramaSize - 1]; // ss
+	unsigned char dd = tramaRegistro[tramaSize - 6]; // día
+	unsigned char mm = tramaRegistro[tramaSize - 5]; // mes
+	unsigned char aa = tramaRegistro[tramaSize - 4]; // año (2 dígitos)
+	unsigned char hh = tramaRegistro[tramaSize - 3]; // hora
+	unsigned char min = tramaRegistro[tramaSize - 2]; // minuto
+	unsigned char ss = tramaRegistro[tramaSize - 1]; // segundo
 
-	// Realiza la concatenacion para obtener el nombre del archivo:
-	sprintf(tiempoNodoStr, "%0.2d%0.2d%0.2d-%0.2d%0.2d%0.2d_", tiempoNodo[2], tiempoNodo[1], tiempoNodo[0], tiempoNodo[3], tiempoNodo[4], tiempoNodo[5]);
-	sprintf(duracionEventoStr, "%0.3d", duracionEvento);
+	// Calcula el año completo (asume 20xx para años < 70, 19xx para >= 70)
+	unsigned int anio_completo = (aa < 70) ? (2000 + aa) : (1900 + aa);
 
-	// Crea el archivo temporal para guardar el nombre del archivo de registro continuo actual:
-	//strcpy(filenameEventoExtraido, pathEventosExtraidos);
-	strcpy(filenameEventoExtraido, idEstacion);
+	// Formato: ID_AAAAMMDD_hhmmss_duracion.dat
+	sprintf(tiempoNodoStr, "%04d%02d%02d_%02d%02d%02d_", anio_completo, mm, dd, hh, min, ss);
+	sprintf(duracionEventoStr, "%03d", duracionEvento);
+
+	// Construye la ruta completa del archivo usando config->eventos_extraidos
+	strcpy(filenameEventoExtraido, config->eventos_extraidos);
+	strcat(filenameEventoExtraido, config->id);
+	strcat(filenameEventoExtraido, "_");
 	strcat(filenameEventoExtraido, tiempoNodoStr);
 	strcat(filenameEventoExtraido, duracionEventoStr);
 	strcat(filenameEventoExtraido, extBin);
@@ -288,10 +285,15 @@ void CrearArchivo(unsigned int duracionEvento, unsigned char *tramaRegistro)
 	printf("Se ha creado el archivo: %s\n", filenameEventoExtraido);
 	fileX = fopen(filenameEventoExtraido, "ab+");
 
-	// Abre el archivo temporal para escribir el nnombre del archivo en modo escritura:
-	ftmp = fopen("/home/rsa/tmp/NombreArchivoEventoExtraido.tmp", "w+");
+	// Construye la ruta del archivo temporal usando config->archivos_temporales
+	char filenameArchivoTemporal[150];
+	strcpy(filenameArchivoTemporal, config->archivos_temporales);
+	strcat(filenameArchivoTemporal, "NombreArchivoEventoExtraido.tmp");
+
+	// Abre el archivo temporal para escribir el nombre del archivo en modo escritura:
+	ftmp = fopen(filenameArchivoTemporal, "w+");
 	// Escribe el nombre del archivo:
-	fwrite(filenameEventoExtraido, sizeof(char), 27, ftmp);
+	fwrite(filenameEventoExtraido, sizeof(char), strlen(filenameEventoExtraido), ftmp);
 	// Cierra el archivo temporal:
 	fclose(ftmp);
 }

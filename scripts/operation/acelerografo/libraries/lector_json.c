@@ -95,6 +95,12 @@ struct datos_config *compilar_json(const char *filename)
         {
             snprintf(datos->eventos_detectados, sizeof(datos->eventos_detectados), "%s", eventos_detectados1);
         }
+
+        const char *eventos_extraidos1 = json_string_value(json_object_get(directorios, "eventos_extraidos"));
+        if (eventos_extraidos1)
+        {
+            snprintf(datos->eventos_extraidos, sizeof(datos->eventos_extraidos), "%s", eventos_extraidos1);
+        }
     }
 
     // No olvides liberar la memoria

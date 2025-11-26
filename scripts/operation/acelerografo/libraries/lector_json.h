@@ -9,6 +9,7 @@ struct datos_config
     char archivos_temporales[100];
     char registro_continuo[100];
     char eventos_detectados[100];
+    char eventos_extraidos[100];
 };
 
 struct datos_config *compilar_json(const char *filename);

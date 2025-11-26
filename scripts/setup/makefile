@@ -40,8 +40,8 @@ registro_continuo: $(PROG_DIR)/registro_continuo*.c $(LIB_DIR_DST)/libdetector_e
 comprobar_registro: $(PROG_DIR)/comprobar_registro*.c $(LIB_DIR_DST)/liblector_json.so
 	$(CC) $(CFLAGS) -I$(LIB_DIR_DST) -o $(EXE_DIR)/comprobar_registro $(PROG_DIR)/comprobar_registro*.c -llector_json -ljansson
 
-extraer_evento: $(PROG_DIR)/extraer_evento*.c
-	$(CC) -o $(EXE_DIR)/extraer_evento $(PROG_DIR)/extraer_evento*.c
+extraer_evento: $(PROG_DIR)/extraer_evento*.c $(LIB_DIR_DST)/liblector_json.so
+	$(CC) $(CFLAGS) -I$(LIB_DIR_DST) -o $(EXE_DIR)/extraer_evento $(PROG_DIR)/extraer_evento*.c -llector_json -ljansson
 
 reset_master: $(PROG_DIR)/reset_master.c
 	$(CC) -o $(EXE_DIR)/reset_master $(PROG_DIR)/reset_master.c -lbcm2835 -lwiringPi
