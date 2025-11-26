@@ -19,9 +19,8 @@
 
 #define PIPE_NAME "/tmp/my_pipe"
 
-// Incluye las librerias de deteccion de eventos y de lectura del archivo json
+// Incluye la libreria de lectura del archivo json
 #include "lector_json.h"
-#include "detector_eventos.h"
 
 // Declaracion de constantes
 #define P2 2
@@ -73,7 +72,6 @@ long tiempoPicUNIX, tiempoRedUNIX, deltaUNIX;
 
 // Variables para extraer los datos de configuracion:
 char id[10];
-char deteccion_eventos[10];
 char publicacion_eventos[10];
 
 // Variables para crear los archivos de datos:
@@ -88,7 +86,6 @@ FILE *fp;
 FILE *ftmp;
 FILE *fTramaTmp;
 FILE *ficheroDatosConfiguracion;
-FILE *obj_fp;
 
 const char *config_filename;
 
@@ -184,27 +181,6 @@ int main(void)
         ObtenerReferenciaTiempo(0);
     }
 
-    // Comprueba la configuracion de deteccion de eventos 
-    strncpy(deteccion_eventos, datos_configuracion->deteccion_eventos, sizeof(deteccion_eventos) - 1);
-    deteccion_eventos[sizeof(deteccion_eventos) - 1] = '\0'; // Asegurar la terminación nula
-    if ((strcmp(deteccion_eventos, "si") == 0) || (strcmp(deteccion_eventos, "no") == 0))
-    {
-        printf("Deteccion de eventos: %s\n", datos_configuracion->deteccion_eventos);
-        // Guarda en el archivo log los datos de configuracion recuperados del archivo JSON
-        snprintf(mensaje_log, sizeof(mensaje_log), "Deteccion de eventos: %s", datos_configuracion->deteccion_eventos);
-        write_log("INFO", mensaje_log);
-        // Si la deteccion de eventos esta activa inicializa el filtro FIR
-        if (strcmp(deteccion_eventos, "si") == 0)
-        {
-            firFloatInit();
-        } 
-    } 
-    else
-    {
-        fprintf(stderr, "Advertencia: No se pudo leer la configuracion de deteccion de eventos. Revise el archivo de configuracion.\n");
-        write_log("WARNING", "No se pudo leer la configuracion de deteccion de eventos");
-    }
-        
     // Liberar la memoria del struct datos_config
     free(datos_configuracion);
 
@@ -336,7 +312,6 @@ void CrearArchivos()
 {
     
     char dir_registro_continuo[100];
-    char dir_eventos_detectados[100];
     char dir_archivos_temporales[100];
 
     char extBin[5];
@@ -347,7 +322,6 @@ void CrearArchivos()
     char timestamp[35];
 
     char filenameArchivoRegistroContinuo[100];
-    char filenameEventosDetectados[100];
     char filenameActualRegistroContinuo[100];
     
     
@@ -364,11 +338,9 @@ void CrearArchivos()
     strncpy(id, config->id, sizeof(id) - 1);
     strncpy(dir_archivos_temporales, config->archivos_temporales, sizeof(dir_archivos_temporales) - 1);
     strncpy(dir_registro_continuo, config->registro_continuo, sizeof(dir_registro_continuo) - 1);
-    strncpy(dir_eventos_detectados, config->eventos_detectados, sizeof(dir_eventos_detectados) - 1);
     id[sizeof(id) - 1] = '\0';  // Asegurar la terminación nula
     dir_archivos_temporales[sizeof(dir_archivos_temporales) - 1] = '\0';
     dir_registro_continuo[sizeof(dir_registro_continuo) - 1] = '\0';
-    dir_eventos_detectados[sizeof(dir_eventos_detectados) - 1] = '\0';
 
     // Asigna el texto correspondiente a los array de caracteres
     strcpy(extBin, ".dat");
@@ -398,18 +370,6 @@ void CrearArchivos()
     // Crea el archivo temporal para los datos de registro continuo:
     snprintf(filenameTemporalRegistroContinuo, sizeof(filenameTemporalRegistroContinuo), "%sTramaTemporal%s", dir_archivos_temporales, extTmp);
 
-    // Crea el archivo de texto para guardar los eventos detectados:
-    snprintf(filenameEventosDetectados, sizeof(filenameEventosDetectados), "%s%s_EventosDetectados%s",dir_eventos_detectados, id, extTxt);
-    printf("   %s\n", filenameEventosDetectados);
-    obj_fp = fopen(filenameEventosDetectados, "a");
-    if (obj_fp == NULL) {
-        fprintf(stderr, "Error al crear el archivo de eventos detectados.\n");
-        fclose(fp); // Cerrar archivo abierto
-        free(config); // Liberar memoria en caso de error
-        return;
-    }
-    printf("   %s\n", filenameEventosDetectados);
-
     // Crea el archivo temporal para guardar los nombres actual y anterior de los archivos RC:
     snprintf(filenameActualRegistroContinuo, sizeof(filenameActualRegistroContinuo), "%sNombreArchivoRegistroContinuo%s", dir_archivos_temporales, extTmp);
     printf("   %s\n", filenameActualRegistroContinuo);
@@ -418,7 +378,6 @@ void CrearArchivos()
         fprintf(stderr, "Error al abrir el archivo temporal para nombres de archivos RC.\n");
         write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
         fclose(fp); // Cerrar archivo abierto
-        fclose(obj_fp); // Cerrar archivo abierto
         free(config); // Liberar memoria en caso de error
         return;
     }
@@ -430,7 +389,6 @@ void CrearArchivos()
         fprintf(stderr, "Error al abrir el archivo temporal para escritura de nombres de archivos RC.\n");
         write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
         fclose(fp); // Cerrar archivo abierto
-        fclose(obj_fp); // Cerrar archivo abierto
         free(config); // Liberar memoria en caso de error
         return;
     }
@@ -520,11 +478,6 @@ void NuevoCiclo()
     GuardarVector(tramaDatos); // Guarda la el vector tramaDatos en el archivo binario
     // CrearArchivos();           //Crea un archivo nuevo si se cumplen las condiciones
 
-    // Llama al metodo para determinar si existe o no un evento sismico:
-    if (strcmp(deteccion_eventos, "si") == 0){
-        DetectarEvento(tramaDatos);
-    }
-    
 }
 
 // C:0xA4	F:0xF4
