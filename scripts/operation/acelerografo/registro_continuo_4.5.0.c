@@ -79,7 +79,7 @@ char temporalRegistroContinuo[35];
 char archivoEventoDetectado[35];
 char archivoActualRegistroContinuo[35];
 
-// Variavle para mensajes log 
+// Variavle para mensajes log
 char mensaje_log[256];
 
 FILE *fp;
@@ -89,8 +89,20 @@ FILE *ficheroDatosConfiguracion;
 
 const char *config_filename;
 
+// Variables globales para tracking de rotación de archivos
+#define INTERVALO_ROTACION 3600  // 3600 segundos = 1 hora
+static int hora_archivo_actual = -1;
+static int minuto_archivo_actual = -1;
+static time_t tiempo_ultima_rotacion = 0;
+static volatile sig_atomic_t debe_terminar = 0;
+
 // Metodo para manejar el tiempo del sistema
 int ComprobarNTP();
+
+// Metodos para rotación automática de archivos
+bool debe_rotar_archivo();
+int crear_nuevo_archivo();
+void manejador_senal_terminacion(int signum);
 
 // Metodos para la comunicacion con el dsPIC
 int ConfiguracionPrincipal();
@@ -187,6 +199,19 @@ int main(void)
     // Configurar el manejador de SIGPIPE
     signal(SIGPIPE, handle_sigpipe);
 
+    // Configurar manejadores de señales para terminación limpia
+    signal(SIGTERM, manejador_senal_terminacion);
+    signal(SIGINT, manejador_senal_terminacion);
+
+    // Crear archivo inicial de adquisición
+    write_log("INFO", "Creando archivo inicial de adquisición...");
+    if (crear_nuevo_archivo() != 0) {
+        write_log("CRITICAL", "FATAL: No se pudo crear archivo inicial");
+        bcm2835_spi_end();
+        bcm2835_close();
+        exit(EXIT_FAILURE);
+    }
+
     // Crear el named pipe
     if (mkfifo(PIPE_NAME, 0666) == -1) {
         if (errno != EEXIST) {
@@ -206,17 +231,24 @@ int main(void)
         write_log("INFO", "Estado del pipe: Creado con exito");
     } 
 
-    // Bucle infinito
-    while (1)
+    // Bucle principal (modificado para permitir cierre limpio)
+    while (!debe_terminar)
     {
         //delay(10);
         __asm__("nop");  // Instrucción "no operation" para evitar optimización excesiva
     }
 
+    // Código de cierre limpio al recibir señal de terminación
+    if (fp != NULL) {
+        fclose(fp);
+        write_log("INFO", "Archivo cerrado limpiamente antes de terminar");
+    }
+
     bcm2835_spi_end();
     bcm2835_close();
 
-    return 0;
+    write_log("INFO", "PROGRAMA FINALIZADO: registro_continuo");
+    exit(EXIT_SUCCESS);
 }
 
 int ConfiguracionPrincipal()
@@ -306,6 +338,125 @@ int ComprobarNTP() {
         return 2;
     }
 }
+
+
+//**************************************************************************************************************************************
+// Funciones para rotación automática de archivos:
+
+// Función para verificar si debe rotar el archivo
+bool debe_rotar_archivo() {
+    time_t tiempo_actual;
+    struct tm *tm_actual;
+
+    // Obtener tiempo actual
+    tiempo_actual = time(NULL);
+    tm_actual = localtime(&tiempo_actual);
+
+    // Caso especial: primera vez (no inicializado)
+    if (hora_archivo_actual == -1) {
+        return true;
+    }
+
+    // Verificar si cambió la hora del reloj
+    if (tm_actual->tm_hour != hora_archivo_actual) {
+        return true;
+    }
+
+    return false;
+}
+
+// Función para crear un nuevo archivo de adquisición
+int crear_nuevo_archivo() {
+    char timestamp[35];
+    char nuevo_archivo[100];
+    char archivo_anterior[100];
+    time_t t;
+    struct tm *tm;
+    struct stat st;
+
+    // Paso 1: Obtener tiempo actual del sistema
+    t = time(NULL);
+    tm = localtime(&t);
+
+    // Guardar nombre del archivo anterior si existe
+    if (fp != NULL) {
+        strncpy(archivo_anterior, filenameTemporalRegistroContinuo, sizeof(archivo_anterior) - 1);
+        archivo_anterior[sizeof(archivo_anterior) - 1] = '\0';
+    }
+
+    // Paso 2: Generar timestamp
+    strftime(timestamp, sizeof(timestamp), "%y%m%d-%H%M%S", tm);
+
+    // Paso 3: Leer configuración para construir ruta completa
+    struct datos_config *config = compilar_json(config_filename);
+    if (config == NULL) {
+        write_log("ERROR", "No se pudo leer configuración para rotación de archivo");
+        return -1;
+    }
+
+    // Construir ruta completa del nuevo archivo
+    snprintf(nuevo_archivo, sizeof(nuevo_archivo), "%s%s_%s.dat",
+             config->registro_continuo,
+             config->id,
+             timestamp);
+
+    // Paso 4: Cerrar archivo anterior si existe
+    if (fp != NULL) {
+        fclose(fp);
+
+        // Obtener tamaño del archivo cerrado
+        if (stat(archivo_anterior, &st) == 0) {
+            double tamaño_mb = (double)st.st_size / (1024.0 * 1024.0);
+            snprintf(mensaje_log, sizeof(mensaje_log),
+                     "Archivo completado y cerrado: %s (%.2f MB)",
+                     archivo_anterior, tamaño_mb);
+            write_log("INFO", mensaje_log);
+        } else {
+            snprintf(mensaje_log, sizeof(mensaje_log),
+                     "Archivo completado y cerrado: %s",
+                     archivo_anterior);
+            write_log("INFO", mensaje_log);
+        }
+    }
+
+    // Paso 5: Abrir nuevo archivo
+    fp = fopen(nuevo_archivo, "wb");
+    if (fp == NULL) {
+        snprintf(mensaje_log, sizeof(mensaje_log),
+                 "ERROR CRÍTICO: No se pudo crear archivo %s",
+                 nuevo_archivo);
+        write_log("CRITICAL", mensaje_log);
+        free(config);
+        return -1;
+    }
+
+    // Paso 6: Actualizar variables globales
+    strncpy(filenameTemporalRegistroContinuo, nuevo_archivo, sizeof(filenameTemporalRegistroContinuo) - 1);
+    filenameTemporalRegistroContinuo[sizeof(filenameTemporalRegistroContinuo) - 1] = '\0';
+    tiempo_ultima_rotacion = t;
+    hora_archivo_actual = tm->tm_hour;
+    minuto_archivo_actual = tm->tm_min;
+
+    // Paso 7: Logging exitoso
+    snprintf(mensaje_log, sizeof(mensaje_log),
+             "Nuevo archivo de adquisición creado: %s",
+             nuevo_archivo);
+    write_log("INFO", mensaje_log);
+
+    free(config);
+    return 0;
+}
+
+// Manejador de señal para terminación limpia
+void manejador_senal_terminacion(int signum) {
+    debe_terminar = 1;
+    snprintf(mensaje_log, sizeof(mensaje_log),
+             "Señal de terminación recibida (%d), cerrando limpiamente...",
+             signum);
+    write_log("INFO", mensaje_log);
+}
+
+//**************************************************************************************************************************************
 
 
 void CrearArchivos()
@@ -649,7 +800,20 @@ void ObtenerReferenciaTiempo(int referencia)
 
 // Esta funcion sirve para guardar en el archivo binario las tramas de 1 segundo recibidas
 void GuardarVector(unsigned char *tramaD) {
-    
+
+    // Verificar si debe rotar el archivo
+    if (debe_rotar_archivo()) {
+        write_log("INFO", "Iniciando rotación de archivo...");
+
+        int resultado = crear_nuevo_archivo();
+
+        if (resultado != 0) {
+            write_log("ERROR", "Error en rotación de archivo, continuando con archivo actual");
+        } else {
+            write_log("INFO", "Rotación de archivo completada exitosamente");
+        }
+    }
+
     // Guardar la trama en el archivo de registro continuo
     if (fp != NULL) {
         size_t outFwrite;
