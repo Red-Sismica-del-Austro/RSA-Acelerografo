@@ -430,14 +430,65 @@ int crear_nuevo_archivo() {
         return -1;
     }
 
-    // Paso 6: Actualizar variables globales
+    // Paso 6: Actualizar archivo temporal con nombres de archivos
+    // (Replicando lógica de CrearArchivos())
+    char filenameActualRegistroContinuo[100];
+    char nombreActualARC[50];
+    char nombreAnteriorARC[50];
+    FILE *ftmp_nombres;
+
+    // Construir ruta del archivo temporal de nombres
+    snprintf(filenameActualRegistroContinuo, sizeof(filenameActualRegistroContinuo),
+             "%sNombreArchivoRegistroContinuo.tmp", config->archivos_temporales);
+
+    // Extraer solo el nombre del nuevo archivo (sin ruta completa)
+    const char *nombre_base_nuevo = strrchr(nuevo_archivo, '/');
+    if (nombre_base_nuevo != NULL) {
+        nombre_base_nuevo++; // Saltar el '/'
+    } else {
+        nombre_base_nuevo = nuevo_archivo;
+    }
+
+    // Leer la primera línea del archivo temporal (será el "anterior" en el nuevo archivo)
+    ftmp_nombres = fopen(filenameActualRegistroContinuo, "rt");
+    if (ftmp_nombres != NULL) {
+        // Si el archivo existe, leer la primera línea (nombre actual que será anterior)
+        if (fgets(nombreAnteriorARC, sizeof(nombreAnteriorARC), ftmp_nombres) == NULL) {
+            strcpy(nombreAnteriorARC, "");
+        }
+        fclose(ftmp_nombres);
+    } else {
+        // Si no existe el archivo (primera vez), no hay anterior
+        strcpy(nombreAnteriorARC, "");
+    }
+
+    // Escribir nuevo archivo temporal con nombre actual y anterior
+    ftmp_nombres = fopen(filenameActualRegistroContinuo, "w");
+    if (ftmp_nombres != NULL) {
+        // Construir nombre actual (solo nombre base, no ruta completa)
+        snprintf(nombreActualARC, sizeof(nombreActualARC), "%s\n", nombre_base_nuevo);
+
+        // Escribir nombre actual
+        fwrite(nombreActualARC, sizeof(char), strlen(nombreActualARC), ftmp_nombres);
+
+        // Escribir nombre anterior (si existe)
+        if (strlen(nombreAnteriorARC) > 0) {
+            fwrite(nombreAnteriorARC, sizeof(char), strlen(nombreAnteriorARC), ftmp_nombres);
+        }
+
+        fclose(ftmp_nombres);
+    } else {
+        write_log("WARNING", "No se pudo actualizar archivo temporal de nombres");
+    }
+
+    // Paso 7: Actualizar variables globales
     strncpy(filenameTemporalRegistroContinuo, nuevo_archivo, sizeof(filenameTemporalRegistroContinuo) - 1);
     filenameTemporalRegistroContinuo[sizeof(filenameTemporalRegistroContinuo) - 1] = '\0';
     tiempo_ultima_rotacion = t;
     hora_archivo_actual = tm->tm_hour;
     minuto_archivo_actual = tm->tm_min;
 
-    // Paso 7: Logging exitoso
+    // Paso 8: Logging exitoso
     snprintf(mensaje_log, sizeof(mensaje_log),
              "Nuevo archivo de adquisición creado: %s",
              nuevo_archivo);
@@ -524,18 +575,22 @@ void CrearArchivos()
     // Crea el archivo temporal para guardar los nombres actual y anterior de los archivos RC:
     snprintf(filenameActualRegistroContinuo, sizeof(filenameActualRegistroContinuo), "%sNombreArchivoRegistroContinuo%s", dir_archivos_temporales, extTmp);
     printf("   %s\n", filenameActualRegistroContinuo);
-    ftmp = fopen(filenameActualRegistroContinuo, "rt");
-    if (ftmp == NULL) {
-        fprintf(stderr, "Error al abrir el archivo temporal para nombres de archivos RC.\n");
-        write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
-        fclose(fp); // Cerrar archivo abierto
-        free(config); // Liberar memoria en caso de error
-        return;
-    }
-    fgets(nombreAnteriorARC, sizeof(nombreAnteriorARC), ftmp);
-    fclose(ftmp);
 
-    ftmp = fopen(filenameActualRegistroContinuo, "w+");
+    // Intentar leer nombre anterior (si existe)
+    ftmp = fopen(filenameActualRegistroContinuo, "rt");
+    if (ftmp != NULL) {
+        // Si el archivo existe, leer la primera línea (nombre actual que será anterior)
+        if (fgets(nombreAnteriorARC, sizeof(nombreAnteriorARC), ftmp) == NULL) {
+            strcpy(nombreAnteriorARC, "");
+        }
+        fclose(ftmp);
+    } else {
+        // Si no existe el archivo (primera vez), no hay anterior
+        strcpy(nombreAnteriorARC, "");
+    }
+
+    // Escribir nuevo archivo temporal con nombre actual y anterior
+    ftmp = fopen(filenameActualRegistroContinuo, "w");
     if (ftmp == NULL) {
         fprintf(stderr, "Error al abrir el archivo temporal para escritura de nombres de archivos RC.\n");
         write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
@@ -546,8 +601,13 @@ void CrearArchivos()
 
     snprintf(nombreActualARC, sizeof(nombreActualARC), "%s_%s%s\n", id, timestamp, extBin);
 
+    // Escribir nombre actual
     fwrite(nombreActualARC, sizeof(char), strlen(nombreActualARC), ftmp);
-    fwrite(nombreAnteriorARC, sizeof(char), strlen(nombreAnteriorARC), ftmp);
+
+    // Escribir nombre anterior (si existe)
+    if (strlen(nombreAnteriorARC) > 0) {
+        fwrite(nombreAnteriorARC, sizeof(char), strlen(nombreAnteriorARC), ftmp);
+    }
 
     printf("\nArchivo RC Actual: %s\n", nombreActualARC);
     printf("Archivo RC Anterior: %s\n\n", nombreAnteriorARC);
@@ -761,7 +821,10 @@ void ObtenerTiempoPIC()
     printf("Tiempo UNIX dsPIC: %d\n", tiempoPicUNIX);
     printf("****************************************\n");
 
-    CrearArchivos();
+    // NOTA: CrearArchivos() ya no se llama aquí porque ahora usamos crear_nuevo_archivo()
+    // que se ejecuta automáticamente en main() y en las rotaciones horarias
+    // CrearArchivos();
+
     IniciarMuestreo();
 }
 
