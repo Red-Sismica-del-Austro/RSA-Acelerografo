@@ -50,6 +50,7 @@ cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente.py $PROJECT_LOCAL_ROOT/scrip
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/extract_segment.py $PROJECT_LOCAL_ROOT/scripts/mseed/extract_segment.py
 cp $PROJECT_GIT_ROOT/scripts/operation/drive/gestor_archivos_acq.py $PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py
+cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_archivo.py
 
 # Copiar el task-script crontab.txt al directorio de proyectos
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
