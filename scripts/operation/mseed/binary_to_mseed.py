@@ -1,3 +1,46 @@
+"""
+Script de conversión de archivos binarios (.dat) a formato miniSEED (.mseed)
+
+EJEMPLOS DE USO:
+
+1. Modo simple (sintaxis corta):
+   python3 binary_to_mseed.py 1                                          # Registro continuo
+   python3 binary_to_mseed.py 2                                          # Evento extraído
+   python3 binary_to_mseed.py 3 archivo.dat                              # Conversión manual (nombre)
+   python3 binary_to_mseed.py 3 /ruta/completa/archivo.dat              # Conversión manual (ruta absoluta)
+
+2. Modo con flags (sintaxis descriptiva):
+   python3 binary_to_mseed.py --continuous                               # Registro continuo
+   python3 binary_to_mseed.py --event                                    # Evento extraído
+   python3 binary_to_mseed.py --file archivo.dat                         # Conversión manual (nombre)
+   python3 binary_to_mseed.py --file /ruta/completa/archivo.dat         # Conversión manual (ruta absoluta)
+
+DESCRIPCIÓN DE MODOS:
+
+- Modo 1 (--continuous):
+    Lee el nombre del archivo desde NombreArchivoRegistroContinuo.tmp
+    Busca en: directorios.registro_continuo (del JSON)
+    Guarda en: directorios.archivos_mseed (del JSON)
+
+- Modo 2 (--event):
+    Lee el nombre del archivo desde NombreArchivoEventoExtraido.tmp
+    Busca en: directorios.eventos_extraidos (del JSON)
+    Guarda en: directorios.eventos_extraidos (del JSON)
+
+- Modo 3 (--file):
+    Especifica manualmente el archivo a convertir
+    Si la ruta es absoluta, usa esa ruta directamente
+    Si es solo el nombre, busca en: directorios.registro_continuo (del JSON)
+    Guarda en: directorios.archivos_mseed (del JSON)
+
+REQUISITOS:
+
+- Variable de entorno PROJECT_LOCAL_ROOT debe estar definida
+- Archivos de configuración necesarios:
+    * configuracion_dispositivo.json
+    * configuracion_mseed.json
+"""
+
 ######################################### ~Librerias~ #################################################
 import numpy as np
 from obspy import UTCDateTime, read, Trace, Stream
@@ -373,92 +416,213 @@ def main():
 
     # Parser de argumentos
     parser = argparse.ArgumentParser(description="Conversor de binario a Mini-SEED")
-    parser.add_argument("modo_simple", nargs="?", choices=["1", "2"],
-                        help="Modo simple (1: Registro continuo, 2: Evento extraído)")
-    parser.add_argument("--modo", choices=["rc", "ee", "archivo"],
-                        help="Modo de conversión (rc: registro continuo, ee: evento extraído, archivo: conversión manual)")
-    parser.add_argument("--nombre", help="Nombre del archivo binario (solo en modo archivo)")
+    parser.add_argument("modo_simple", nargs="?", choices=["1", "2", "3"],
+                        help="Modo simple (1: Registro continuo, 2: Evento extraído, 3: Conversión manual)")
+    parser.add_argument("archivo_nombre", nargs="?",
+                        help="Nombre del archivo binario (requerido para modo 3)")
+    parser.add_argument("--continuous", action="store_true",
+                        help="Modo registro continuo (equivalente a modo 1)")
+    parser.add_argument("--event", action="store_true",
+                        help="Modo evento extraído (equivalente a modo 2)")
+    parser.add_argument("--file", metavar="ARCHIVO",
+                        help="Modo conversión manual, especifica el archivo binario (equivalente a modo 3)")
     args = parser.parse_args()
 
-    # Variable de entorno
+    # Obtiene la variable de entorno para definir la ruta del archivo de configuración
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
     if not project_local_root:
         print("La variable de entorno PROJECT_LOCAL_ROOT no está definida.")
         return
+
+    # Definir rutas de archivos y directorios
     config_mseed_file = os.path.join(project_local_root, "configuracion", "configuracion_mseed.json")
     config_dispositivo_file = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
     archivoNombresArchivosRC = os.path.join(project_local_root, "tmp-files", "NombreArchivoRegistroContinuo.tmp")
     archivoNombresArchivosEE = os.path.join(project_local_root, "tmp-files", "NombreArchivoEventoExtraido.tmp")
-    script_subir_archivo_drive = os.path.join(project_local_root, "scripts", "drive", "subir_archivo.py")
     log_directory = os.path.join(project_local_root, "log-files")
 
-    # Carga de configuraciones
+    # Lee el archivo de configuración de mseed
     config_mseed = read_fileJSON(config_mseed_file)
+    if config_mseed is None:
+        print("No se pudo leer el archivo de configuración mseed. Terminando el programa.")
+        return
+
+    # Lee el archivo de configuración del dispositivo
     config_dispositivo = read_fileJSON(config_dispositivo_file)
-    if config_mseed is None or config_dispositivo is None:
-        print("Error leyendo archivos de configuración. Terminando el programa.")
-        return
-    
-    # Determinar tipo de archivo y ruta
-    if args.modo_simple in ("1", "2"):
-        tipoArchivo = args.modo_simple
-    elif args.modo == "rc":
-        tipoArchivo = "1"
-    elif args.modo == "ee":
-        tipoArchivo = "2"
-    elif args.modo == "archivo":
-        tipoArchivo = "archivo"
-    else:
-        print("Error: No se especificó un modo válido.")
+    if config_dispositivo is None:
+        print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
         return
 
-    if tipoArchivo=='1':
-        #Archivos registro continuo
-        path_registro_continuo = config_dispositivo.get("directorios", {}).get("registro_continuo", "Unknown")
-        with open(archivoNombresArchivosRC) as ficheroNombresArchivos:
-            lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
-            if len(lineasFicheroNombresArchivos) < 2:
-                print("Error: El archivo de nombres de registro continuo no tiene suficientes líneas.")
-                return
-            binary_filename = lineasFicheroNombresArchivos[1].rstrip('\n')
-            binary_file = path_registro_continuo + binary_filename
-            path_archivo_salida = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
-            print(f'Convirtiendo el archivo: {binary_filename}')
-    elif tipoArchivo=='2':
-        #Archivos eventos extraidos
-        path_eventos_extraidos = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "Unknown")
-        with open(archivoNombresArchivosEE) as ficheroNombresArchivos:
-            lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
-            if len(lineasFicheroNombresArchivos) < 1:
-                print("Error: El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
-                return
-            binary_filename = lineasFicheroNombresArchivos[0].rstrip('\n')
-            binary_file = path_eventos_extraidos + binary_filename
-            path_archivo_salida = path_eventos_extraidos
-            print(f'Convirtiendo el archivo: {binary_filename}')
-    elif tipoArchivo == "archivo":
-        if not args.nombre:
-            print("Error: Se debe especificar --nombre con el nombre del archivo binario.")
-            return
-        binary_filename = args.nombre
-        binary_file = os.path.join(project_local_root, "resultados", "registro-continuo", binary_filename)
-        path_archivo_salida = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
-        print(f'Convirtiendo el archivo manual: {binary_filename}')
+    # Obtener rutas desde configuracion_dispositivo.json
+    path_registro_continuo = config_dispositivo.get("directorios", {}).get("registro_continuo", "")
+    path_eventos_extraidos = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "")
+    path_archivos_mseed = config_dispositivo.get("directorios", {}).get("archivos_mseed", "")
 
-            
     # Obtiene el codigo de la estacion
-    codigo_estacion = config_mseed["CODIGO(1)"]
+    codigo_estacion = config_mseed.get("CODIGO(1)", "Unknown")
+    if codigo_estacion == "Unknown":
+        print("No se encontró 'CODIGO(1)' en configuracion_mseed.json")
+        return
+
     # Obtiene el ID del dispositivo
     dispositivo_id = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
+    if dispositivo_id == "Unknown":
+        print("No se encontró 'id' del dispositivo en configuracion_dispositivo.json")
+        return
+
+    # Verificar que el directorio de logs existe, si no, crearlo
+    if not os.path.isdir(log_directory):
+        try:
+            os.makedirs(log_directory)
+            print(f"Directorio de logs creado: {log_directory}")
+        except Exception as e:
+            print(f"Error al crear el directorio de logs {log_directory}: {e}")
+            return
+
     # Inicializa el logger
     logger = obtener_logger(dispositivo_id, log_directory, "mseed.log")
-    logger.info(f'Convirtiendo el archivo binario: {binary_filename}')
+
+    # Determinar tipo de archivo y ruta
+    if args.modo_simple in ("1", "2", "3"):
+        tipoArchivo = args.modo_simple
+    elif args.continuous:
+        tipoArchivo = "1"
+    elif args.event:
+        tipoArchivo = "2"
+    elif args.file:
+        tipoArchivo = "3"
+    else:
+        logger.error("No se especificó un modo válido.")
+        print("Error: No se especificó un modo válido.")
+        print("Uso:")
+        print("  python3 binary_to_mseed.py 1               # Registro continuo")
+        print("  python3 binary_to_mseed.py 2               # Evento extraído")
+        print("  python3 binary_to_mseed.py 3 archivo.dat   # Conversión manual")
+        print("  python3 binary_to_mseed.py --continuous    # Registro continuo")
+        print("  python3 binary_to_mseed.py --event         # Evento extraído")
+        print("  python3 binary_to_mseed.py --file archivo.dat  # Conversión manual")
+        return
+
+    if tipoArchivo == '1':
+        # Archivos registro continuo
+        if not path_registro_continuo:
+            logger.error("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+            print("Error: No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+            return
+        if not path_archivos_mseed:
+            logger.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            print("Error: No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            return
+
+        # Verificar que los directorios existen
+        if not os.path.isdir(path_registro_continuo):
+            logger.error(f"El directorio de registro continuo no existe: {path_registro_continuo}")
+            print(f"Error: El directorio de registro continuo no existe: {path_registro_continuo}")
+            return
+        if not os.path.isdir(path_archivos_mseed):
+            logger.error(f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            print(f"Error: El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            return
+
+        try:
+            with open(archivoNombresArchivosRC) as ficheroNombresArchivos:
+                lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
+                if len(lineasFicheroNombresArchivos) < 2:
+                    logger.error("El archivo de nombres de registro continuo no tiene suficientes líneas.")
+                    print("Error: El archivo de nombres de registro continuo no tiene suficientes líneas.")
+                    return
+                binary_filename = lineasFicheroNombresArchivos[1].rstrip('\n')
+        except FileNotFoundError:
+            logger.error(f"No se encontró el archivo: {archivoNombresArchivosRC}")
+            print(f"Error: No se encontró el archivo: {archivoNombresArchivosRC}")
+            return
+
+        binary_file = os.path.join(path_registro_continuo, binary_filename)
+        path_archivo_salida = path_archivos_mseed
+        logger.info(f'Convirtiendo el archivo de registro continuo: {binary_filename}')
+        print(f'Convirtiendo el archivo: {binary_filename}')
+
+    elif tipoArchivo == '2':
+        # Archivos eventos extraidos
+        if not path_eventos_extraidos:
+            logger.error("No se encontró la ruta 'eventos_extraidos' en configuracion_dispositivo.json")
+            print("Error: No se encontró la ruta 'eventos_extraidos' en configuracion_dispositivo.json")
+            return
+
+        # Verificar que el directorio existe
+        if not os.path.isdir(path_eventos_extraidos):
+            logger.error(f"El directorio de eventos extraídos no existe: {path_eventos_extraidos}")
+            print(f"Error: El directorio de eventos extraídos no existe: {path_eventos_extraidos}")
+            return
+
+        try:
+            with open(archivoNombresArchivosEE) as ficheroNombresArchivos:
+                lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
+                if len(lineasFicheroNombresArchivos) < 1:
+                    logger.error("El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
+                    print("Error: El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
+                    return
+                binary_filename = lineasFicheroNombresArchivos[0].rstrip('\n')
+        except FileNotFoundError:
+            logger.error(f"No se encontró el archivo: {archivoNombresArchivosEE}")
+            print(f"Error: No se encontró el archivo: {archivoNombresArchivosEE}")
+            return
+
+        binary_file = os.path.join(path_eventos_extraidos, binary_filename)
+        path_archivo_salida = path_eventos_extraidos
+        logger.info(f'Convirtiendo el archivo de evento extraído: {binary_filename}')
+        print(f'Convirtiendo el archivo: {binary_filename}')
+
+    elif tipoArchivo == '3':
+        # Conversión manual de archivo específico
+        # Determinar la ruta del archivo: puede venir como argumento posicional o con --file
+        archivo_input = args.archivo_nombre or args.file
+
+        if not archivo_input:
+            logger.error("Se debe especificar el archivo binario como segundo argumento o con --file")
+            print("Error: Se debe especificar el archivo binario.")
+            print("Uso: python3 binary_to_mseed.py 3 <archivo.dat>")
+            print("  o: python3 binary_to_mseed.py --file <archivo.dat>")
+            return
+
+        # Si la ruta es absoluta, usarla directamente; si no, buscar en path_registro_continuo
+        if os.path.isabs(archivo_input):
+            binary_file = archivo_input
+            binary_filename = os.path.basename(archivo_input)
+        else:
+            if not path_registro_continuo:
+                logger.error("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+                print("Error: No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+                return
+            binary_filename = archivo_input
+            binary_file = os.path.join(path_registro_continuo, binary_filename)
+
+        if not path_archivos_mseed:
+            logger.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            print("Error: No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            return
+
+        # Verificar que el directorio de salida existe
+        if not os.path.isdir(path_archivos_mseed):
+            logger.error(f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            print(f"Error: El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            return
+
+        path_archivo_salida = path_archivos_mseed
+        logger.info(f'Convirtiendo el archivo manual: {binary_filename} desde {binary_file}')
+        print(f'Convirtiendo el archivo manual: {binary_filename}')
+
+    # Verificar que el archivo binario existe
+    if not os.path.isfile(binary_file):
+        logger.error(f"El archivo binario no existe: {binary_file}")
+        print(f"Error: El archivo binario no existe: {binary_file}")
+        return
 
     # Extraer tiempo del archivo binario
     tiempo_binario = extraer_tiempo_binario(binary_file)
     if tiempo_binario is None:
+        logger.error(f'Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto: {binary_filename}')
         print("Error al extraer el tiempo del archivo binario.")
-        logger.error(f'Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto')
         return  
 
     # Inicializa la conversion del archivo
