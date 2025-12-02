@@ -130,28 +130,26 @@ def obtener_logger(id_estacion, log_directory, log_filename):
 ############################################ ~Main~ ###################################################
 def main():
 
-    # Lee los parametros de entrada: <nombre_archivo> <tipo_archivo> <borrar_despues>
-    
-    if len(sys.argv) != 4:
-        print("Uso: subir_archivo_drive.py <nombre_archivo> <tipo_archivo: 1.Registro continuo 2.Evento extraido 3.mseed> <borrar_despues: 0.No 1.Si >")
-        return
-    
-    nombre_archivo = sys.argv[1]
-    tipo_archivo = sys.argv[2] 
-    borrar_despues = sys.argv[3]
+    # Lee los parametros de entrada: <nombre_archivo> <tipo_archivo>
 
-    # Obtiene la variable de entorno para definir la ruta del archivo de configuracion:
-    project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
-    if project_local_root:
-        #print(f"PROJECT_LOCAL_ROOT: {project_local_root}")
-        # Concatenar PROJECT_LOCAL_CONFIG con las diferentes rutas de los archivos y scripts:
-        config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
-        credentials_file = os.path.join(project_local_root, "configuracion", "drive_credentials.json")
-        token_file = os.path.join(project_local_root, "configuracion", "drive_token.json")
-        log_directory = os.path.join(project_local_root, "log-files")
-    else:
-        print("La variable de entorno no están definida.")
+    if len(sys.argv) != 3:
+        print("Uso: subir_archivo_drive.py <nombre_archivo> <tipo_archivo: 1.Registro continuo 2.Evento extraido 3.mseed>")
         return
+
+    nombre_archivo = sys.argv[1]
+    tipo_archivo = sys.argv[2]
+
+    # Obtiene la variable de entorno para definir la ruta del archivo de configuración
+    project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
+    if not project_local_root:
+        print("La variable de entorno PROJECT_LOCAL_ROOT no está definida.")
+        return
+
+    # Definir rutas de archivos y directorios
+    config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
+    credentials_file = os.path.join(project_local_root, "configuracion", "drive_credentials.json")
+    token_file = os.path.join(project_local_root, "configuracion", "drive_token.json")
+    log_directory = os.path.join(project_local_root, "log-files")
 
     # Lee el archivo de configuración del dispositivo
     config_dispositivo = read_fileJSON(config_dispositivo_path)
@@ -159,23 +157,54 @@ def main():
         print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
         return
 
-    if tipo_archivo=='1':
-        #Archivos registro continuo
-        path_file = config_dispositivo.get("directorios", {}).get("registro_continuo", "Unknown")
-        drive_id = config_dispositivo.get("drive", {}).get("registro_continuo", "Unknown")
-    elif tipo_archivo=='2':
-        #Archivos eventos extraidos
-        path_file = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "Unknown")
-        drive_id = config_dispositivo.get("drive", {}).get("eventos_extraidos", "Unknown")
-    elif tipo_archivo=='3':
-        #Archivos registro continuo
-        path_file = config_dispositivo.get("directorios", {}).get("archivos_mseed", "Unknown")
-        drive_id = config_dispositivo.get("drive", {}).get("registro_continuo", "Unknown")
-    else:
-        print("Tipo de archivo no soportado")
-        
+    # Obtener rutas desde configuracion_dispositivo.json
+    path_registro_continuo = config_dispositivo.get("directorios", {}).get("registro_continuo", "")
+    path_archivos_mseed = config_dispositivo.get("directorios", {}).get("archivos_mseed", "")
+    path_eventos_extraidos = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "")
+    
+    # Obtener IDs de carpetas de Drive
+    drive_id_registro_continuo = config_dispositivo.get("drive", {}).get("registro_continuo", "")
+    drive_id_eventos_extraidos = config_dispositivo.get("drive", {}).get("eventos_extraidos", "")
+
+    # Obtener ID de la estación
     id_estacion = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
-    path_completo_archivo = path_file + nombre_archivo
+
+    # Determinar ruta y carpeta de Drive según el tipo de archivo
+    if tipo_archivo == '1':
+        # Archivos registro continuo
+        if not path_registro_continuo:
+            print("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+            return
+        if not drive_id_registro_continuo:
+            print("No se encontró el ID de Drive 'registro_continuo' en configuracion_dispositivo.json")
+            return
+        path_file = path_registro_continuo
+        drive_id = drive_id_registro_continuo
+    elif tipo_archivo == '2':
+        # Archivos eventos extraidos
+        if not path_eventos_extraidos:
+            print("No se encontró la ruta 'eventos_extraidos' en configuracion_dispositivo.json")
+            return
+        if not drive_id_eventos_extraidos:
+            print("No se encontró el ID de Drive 'eventos_extraidos' en configuracion_dispositivo.json")
+            return
+        path_file = path_eventos_extraidos
+        drive_id = drive_id_eventos_extraidos
+    elif tipo_archivo == '3':
+        # Archivos mseed
+        if not path_archivos_mseed:
+            print("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            return
+        if not drive_id_registro_continuo:
+            print("No se encontró el ID de Drive 'registro_continuo' en configuracion_dispositivo.json")
+            return
+        path_file = path_archivos_mseed
+        drive_id = drive_id_registro_continuo
+    else:
+        print(f"Tipo de archivo no soportado: {tipo_archivo}")
+        return
+
+    path_completo_archivo = os.path.join(path_file, nombre_archivo)
         
     # Obtiene el directorio de logs y lo crea si no existe
     if not os.path.exists(log_directory):
@@ -197,18 +226,13 @@ def main():
         # Llama al metodo para subir el archivo a Google Drive
         try:
             print('Subiendo el archivo: %s' %path_completo_archivo)
-            #logger.info("Subiendo el archivo: %s", nombre_archivo)
             file_uploaded = insert_file(service, nombre_archivo, nombre_archivo, drive_id, 'text/plain', path_completo_archivo)
             logger.info(f'Archivo {nombre_archivo} subido correctamente a Google Drive')
-            print('Archivo ' + nombre_archivo + ' subido correctamente a Google Drive ' )
-            if borrar_despues =='1':
-                os.remove(path_completo_archivo)
-                print('Archivo local eliminado: %s' % path_completo_archivo)
-                logger.info(f'Archivo {nombre_archivo} eliminado')
+            print('Archivo ' + nombre_archivo + ' subido correctamente a Google Drive')
         except Exception as e:
             # Llama al metodo para guardar el evento ocurrido en el archivo
             logger.error(f'Error subiendo el archivo {nombre_archivo} a Google Drive. Codigo: {str(e)}')
-            print ('Error subiendo el archivo a Google Drive')
+            print('Error subiendo el archivo a Google Drive')
     
 
 #######################################################################################################

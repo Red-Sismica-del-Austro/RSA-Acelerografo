@@ -8,15 +8,17 @@
         "modo_adquisicion": "offline"
     },
     "directorios": {
-        "archivos_temporales": "/home/rsa/projects/acelerografo/tmp-files/",
-        "registro_continuo": "/home/rsa/projects/acelerografo/resultados/registro-continuo/",
-        "eventos_detectados": "/home/rsa/projects/acelerografo/resultados/eventos-detectados/",
-        "eventos_extraidos": "/home/rsa/projects/acelerografo/resultados/eventos-extraidos/",
-        "archivos_mseed": "/home/rsa/projects/acelerografo/resultados/mseed/"
+        "registro_continuo": "/home/rsa/data/registro-continuo/",
+        "archivos_mseed": "/home/rsa/data/mseed/",
+        "eventos_extraidos": "/home/rsa/data/eventos-extraidos/",
+        "archivos_temporales": "/home/rsa/projects/acelerografo/tmp-files/"
     },
     "drive": {
         "registro_continuo": "token_registro_continuo",
+        "archivos_mseed": "token_archivos_mseed",
         "eventos_extraidos": "token_eventos_extraidos",
+        "archivos_temporales": "token_archivos_temporales",
+        "archivos_registro": "token_log_files",
         "max_reintentos": 5,
         "tiempo_espera": 2
     }
