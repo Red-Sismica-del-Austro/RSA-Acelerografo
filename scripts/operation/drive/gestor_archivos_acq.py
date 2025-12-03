@@ -1,9 +1,46 @@
+"""
+Gestor de archivos para sistema de adquisición de datos sísmicos
+
+DESCRIPCIÓN:
+Script que gestiona archivos binarios y miniSEED según el modo de adquisición:
+- Modo offline: Gestiona espacio eliminando archivos binarios antiguos
+- Modo online: Sube archivos miniSEED a Google Drive automáticamente
+
+USO:
+    python3 gestor_archivos_acq.py              # Ejecución normal
+    python3 gestor_archivos_acq.py --dry-run    # Simulación sin cambios reales
+
+MODO DRY-RUN:
+El parámetro --dry-run permite simular todas las operaciones sin realizar cambios:
+- No borra archivos locales
+- No sube archivos a Google Drive
+- Muestra qué operaciones se ejecutarían
+- Útil para verificar comportamiento antes de ejecutar en producción
+
+REQUISITOS:
+- Variable de entorno PROJECT_LOCAL_ROOT debe estar definida
+- Archivo configuracion_dispositivo.json con:
+  * dispositivo.modo_adquisicion: "online" o "offline"
+  * directorios.registro_continuo
+  * directorios.archivos_mseed
+  * drive.carpetas.mseed_id (para modo online)
+  * drive.config.max_reintentos
+  * drive.config.tiempo_espera
+"""
+
 import os
-import subprocess
 import shutil
 import socket
 import json
 import logging
+import sys
+
+# Importar funciones de subir_archivo.py (mismo directorio)
+from subir_archivo import (
+    Try_Autenticar_Drive,
+    subir_archivo_con_reintentos,
+    SCOPES
+)
 
 # Configurar logging básico para mensajes tempranos
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -47,13 +84,19 @@ def check_internet_connection(logger, host="8.8.8.8", port=53, timeout=3):
         return False
 
 # Borra el archivo más antiguo con la extensión indicada en el directorio especificado
-def delete_oldest_file(directory, extension, logger):
+def delete_oldest_file(directory, extension, logger, dry_run=False):
     files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(extension)]
     if not files:
         logger.warning(f"No se encontraron archivos con extensión {extension} en {directory}.")
         return
     oldest_file = min(files, key=os.path.getmtime)
     filename = os.path.basename(oldest_file)
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Se borraría el archivo más antiguo: {filename}")
+        print(f"[DRY-RUN] Se borraría: {filename}")
+        return
+
     try:
         os.remove(oldest_file)
         logger.info(f"Se borró el archivo más antiguo: {filename}")
@@ -89,6 +132,17 @@ def obtener_logger(id_estacion, log_directory, log_filename):
 #######################################################################################################
 
 def main():
+    # Verificar si se ejecuta en modo dry-run
+    dry_run = "--dry-run" in sys.argv
+
+    if dry_run:
+        print("\n" + "="*70)
+        print("MODO DRY-RUN ACTIVADO")
+        print("="*70)
+        print("Las operaciones se simularán sin realizar cambios reales.")
+        print("No se subirán archivos ni se borrarán datos.")
+        print("="*70 + "\n")
+
     # Obtiene la variable de entorno para definir la ruta del archivo de configuración:
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
     if not project_local_root:
@@ -96,7 +150,6 @@ def main():
         return
     
     # Definir rutas de archivos y directorios
-    script_subir_archivo_drive = os.path.join(project_local_root, "scripts", "drive", "subir_archivo.py")
     config_dispositivo_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
     log_directory = os.path.join(project_local_root, "log-files")
 
@@ -145,6 +198,9 @@ def main():
     
     if mode_acq == "offline":
         logger.info("Modo offline activado.")
+        if dry_run:
+            logger.info("[DRY-RUN] Simulando operaciones en modo offline")
+
         # Crear lista de rutas completas de los archivos binarios
         binary_files = [os.path.join(binary_directory, f) for f in archivos_binarios]
         if binary_files:
@@ -152,9 +208,17 @@ def main():
             most_recent_file = max(binary_files, key=os.path.getmtime)
             filename_bin_recent = os.path.basename(most_recent_file)
             logger.info(f"Archivo binario más reciente (no se borrará): {filename_bin_recent}")
+
             # Borrar todos los archivos excepto el más reciente
-            for path_archivo in binary_files:
-                if path_archivo != most_recent_file:
+            archivos_a_borrar = [p for p in binary_files if p != most_recent_file]
+            if dry_run:
+                logger.info(f"[DRY-RUN] Se borrarían {len(archivos_a_borrar)} archivos binarios")
+                for path_archivo in archivos_a_borrar:
+                    filename_bin = os.path.basename(path_archivo)
+                    #logger.info(f"[DRY-RUN] Se borraría: {filename_bin}")
+                    print(f"[DRY-RUN] Se borraría archivo binario: {filename_bin}")
+            else:
+                for path_archivo in archivos_a_borrar:
                     filename_bin = os.path.basename(path_archivo)
                     try:
                         os.remove(path_archivo)
@@ -169,32 +233,64 @@ def main():
         logger.info(f"Espacio libre en directorio mseed: {free_space:.2f}%")
         if free_space < min_free_space_threshold:
             logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo mseed más antiguo.")
-            delete_oldest_file(mseed_directory, ".mseed", logger)
+            delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
     
     elif mode_acq == "online":
         logger.info("Modo online activado.")
+        if dry_run:
+            logger.info("[DRY-RUN] Simulando operaciones en modo online")
+
         if check_internet_connection(logger):
             logger.info("Conexión a internet establecida. Se procederá a subir los archivos mseed a Google Drive.")
             if archivos_mseed:
-                # Obtener parámetros de subida desde configuración (por defecto: max_reintentos=3, tiempo_espera=1)
-                max_reintentos = str(config_dispositivo.get("drive", {}).get("max_reintentos", 3))
-                tiempo_espera = str(config_dispositivo.get("drive", {}).get("tiempo_espera", 1))
+                # Obtener parámetros de subida desde configuración
+                max_reintentos = config_dispositivo.get("drive", {}).get("config", {}).get("max_reintentos", 3)
+                tiempo_espera = config_dispositivo.get("drive", {}).get("config", {}).get("tiempo_espera", 2)
+                drive_id = config_dispositivo.get("drive", {}).get("carpetas", {}).get("mseed_id", "")
 
-                for archivo in archivos_mseed:
-                    logger.info(f"Subiendo el archivo: {archivo}")
-                    result = subprocess.run(
-                        ["python3", script_subir_archivo_drive, archivo, max_reintentos, tiempo_espera],
-                        capture_output=True,
-                        text=True
-                    )
-                    if result.returncode == 0:
-                        logger.info(f"Archivo {archivo} subido exitosamente a Google Drive.")
-                        if result.stdout:
-                            logger.debug(f"Salida: {result.stdout.strip()}")
+                if not drive_id:
+                    logger.error("No se encontró el ID de carpeta de Drive 'mseed_id' en configuracion_dispositivo.json")
+                else:
+                    if dry_run:
+                        # Modo dry-run: simular subida sin conectar a Drive
+                        logger.info(f"[DRY-RUN] Se subirían {len(archivos_mseed)} archivos a Google Drive")
+                        for archivo in archivos_mseed:
+                            #logger.info(f"[DRY-RUN] Se subiría: {archivo}")
+                            print(f"[DRY-RUN] Se subiría a Drive: {archivo}")
+                        logger.info(f"[DRY-RUN] Resumen: {len(archivos_mseed)} archivos preparados para subir")
                     else:
-                        logger.error(f"Error al subir el archivo {archivo}. Código de retorno: {result.returncode}")
-                        if result.stderr:
-                            logger.error(f"Error: {result.stderr.strip()}")
+                        # Obtener rutas de configuración
+                        credentials_file = os.path.join(project_local_root, "configuracion", "drive_credentials.json")
+                        token_file = os.path.join(project_local_root, "configuracion", "drive_token.json")
+
+                        # Autenticar una sola vez para todos los archivos
+                        logger.info("Autenticando en Google Drive...")
+                        service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
+
+                        if service:
+                            # Subir todos los archivos usando la misma conexión
+                            archivos_subidos_exitosamente = 0
+                            for archivo in archivos_mseed:
+                                path_completo = os.path.join(mseed_directory, archivo)
+                                logger.info(f"Procesando archivo: {archivo}")
+
+                                exito = subir_archivo_con_reintentos(
+                                    service=service,
+                                    nombre_archivo=archivo,
+                                    path_completo_archivo=path_completo,
+                                    drive_id=drive_id,
+                                    max_reintentos=max_reintentos,
+                                    tiempo_espera=tiempo_espera,
+                                    logger=logger,
+                                    borrar_despues=False
+                                )
+
+                                if exito:
+                                    archivos_subidos_exitosamente += 1
+
+                            logger.info(f"Resumen: {archivos_subidos_exitosamente}/{len(archivos_mseed)} archivos subidos exitosamente")
+                        else:
+                            logger.error("No se pudo autenticar en Google Drive. Verifica las credenciales.")
             else:
                 logger.warning("No se encontraron archivos mseed en el directorio especificado.")
         else:
@@ -203,7 +299,7 @@ def main():
             logger.info(f"Espacio libre en directorio mseed: {free_space:.2f}%")
             if free_space < min_free_space_threshold:
                 logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo mseed más antiguo.")
-                delete_oldest_file(mseed_directory, ".mseed", logger)
+                delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
             else:
                 logger.info("Espacio disponible suficiente en la partición.")
 

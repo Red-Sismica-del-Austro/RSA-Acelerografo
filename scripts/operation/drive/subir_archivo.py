@@ -96,6 +96,77 @@ SCOPES = 'https://www.googleapis.com/auth/drive'
 
 ######################################### ~Funciones~ #################################################
 
+def subir_archivo_con_reintentos(service, nombre_archivo, path_completo_archivo, drive_id,
+                                  max_reintentos, tiempo_espera, logger, borrar_despues=False):
+    """
+    Función reutilizable para subir un archivo a Google Drive con sistema de reintentos.
+
+    Parámetros:
+        service: Objeto de servicio autenticado de Google Drive
+        nombre_archivo: Nombre del archivo (sin ruta)
+        path_completo_archivo: Ruta completa del archivo local
+        drive_id: ID de la carpeta de Drive destino
+        max_reintentos: Número máximo de intentos
+        tiempo_espera: Segundos de espera entre reintentos
+        logger: Objeto logger para registro
+        borrar_despues: Si True, borra el archivo local después de subida exitosa
+
+    Retorna:
+        True si la subida fue exitosa, False en caso contrario
+    """
+    intento = 0
+    archivo_subido = False
+
+    while intento < max_reintentos and not archivo_subido:
+        intento += 1
+        try:
+            if intento == 1:
+                logger.info(f'Subiendo el archivo: {nombre_archivo}')
+                print(f'Subiendo el archivo: {path_completo_archivo}')
+            else:
+                logger.info(f'Reintento {intento}/{max_reintentos} para subir el archivo: {nombre_archivo}')
+                print(f'Reintento {intento}/{max_reintentos}...')
+
+            file_uploaded = insert_file(service, nombre_archivo, nombre_archivo, drive_id, 'text/plain', path_completo_archivo)
+
+            if file_uploaded:
+                archivo_subido = True
+                logger.info(f'Archivo {nombre_archivo} subido correctamente a Google Drive en el intento {intento}')
+                print(f'Archivo {nombre_archivo} subido correctamente a Google Drive')
+
+                # Si se especificó borrar_despues, borrar el archivo local
+                if borrar_despues:
+                    try:
+                        os.remove(path_completo_archivo)
+                        logger.info(f'Archivo local {nombre_archivo} borrado exitosamente después de la subida')
+                        print(f'Archivo local {nombre_archivo} borrado exitosamente')
+                    except Exception as e:
+                        logger.error(f'Error al borrar el archivo local {nombre_archivo}: {str(e)}')
+                        print(f'ADVERTENCIA: No se pudo borrar el archivo local: {str(e)}')
+            else:
+                logger.warning(f'Intento {intento} fallido: No se recibió confirmación de subida')
+                if intento < max_reintentos:
+                    logger.info(f'Esperando {tiempo_espera} segundos antes del siguiente intento...')
+                    print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
+                    time.sleep(tiempo_espera)
+
+        except Exception as e:
+            logger.error(f'Error en intento {intento}/{max_reintentos} subiendo {nombre_archivo}. Codigo: {str(e)}')
+            print(f'Error en intento {intento}: {str(e)}')
+
+            if intento < max_reintentos:
+                logger.info(f'Esperando {tiempo_espera} segundos antes del siguiente intento...')
+                print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
+                time.sleep(tiempo_espera)
+
+    # Verificar resultado final
+    if not archivo_subido:
+        logger.error(f'No se pudo subir el archivo {nombre_archivo} después de {max_reintentos} intentos')
+        print(f'ERROR: No se pudo subir el archivo después de {max_reintentos} intentos')
+
+    return archivo_subido
+
+
 # Lee un archivo de configuración en formato JSON y devuelve su contenido como un diccionario.
 def read_fileJSON(nameFile):
 
@@ -339,56 +410,17 @@ def main():
     service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
 
     if isConecctedDrive == True:
-        # Llama al metodo para subir el archivo a Google Drive con reintentos
-        intento = 0
-        archivo_subido = False
-
-        while intento < max_reintentos and not archivo_subido:
-            intento += 1
-            try:
-                if intento == 1:
-                    logger.info(f'Subiendo el archivo: {nombre_archivo}')
-                    print(f'Subiendo el archivo: {path_completo_archivo}')
-                else:
-                    logger.info(f'Reintento {intento}/{max_reintentos} para subir el archivo: {nombre_archivo}')
-                    print(f'Reintento {intento}/{max_reintentos}...')
-
-                file_uploaded = insert_file(service, nombre_archivo, nombre_archivo, drive_id, 'text/plain', path_completo_archivo)
-
-                if file_uploaded:
-                    archivo_subido = True
-                    logger.info(f'Archivo {nombre_archivo} subido correctamente a Google Drive en el intento {intento}')
-                    print(f'Archivo {nombre_archivo} subido correctamente a Google Drive')
-
-                    # Si se especificó --delete, borrar el archivo local
-                    if borrar_despues:
-                        try:
-                            os.remove(path_completo_archivo)
-                            logger.info(f'Archivo local {nombre_archivo} borrado exitosamente después de la subida')
-                            print(f'Archivo local {nombre_archivo} borrado exitosamente')
-                        except Exception as e:
-                            logger.error(f'Error al borrar el archivo local {nombre_archivo}: {str(e)}')
-                            print(f'ADVERTENCIA: No se pudo borrar el archivo local: {str(e)}')
-                else:
-                    logger.warning(f'Intento {intento} fallido: No se recibió confirmación de subida')
-                    if intento < max_reintentos:
-                        logger.info(f'Esperando {tiempo_espera} segundos antes del siguiente intento...')
-                        print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
-                        time.sleep(tiempo_espera)
-
-            except Exception as e:
-                logger.error(f'Error en intento {intento}/{max_reintentos} subiendo {nombre_archivo}. Codigo: {str(e)}')
-                print(f'Error en intento {intento}: {str(e)}')
-
-                if intento < max_reintentos:
-                    logger.info(f'Esperando {tiempo_espera} segundos antes del siguiente intento...')
-                    print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
-                    time.sleep(tiempo_espera)
-
-        # Verificar resultado final
-        if not archivo_subido:
-            logger.error(f'No se pudo subir el archivo {nombre_archivo} después de {max_reintentos} intentos')
-            print(f'ERROR: No se pudo subir el archivo después de {max_reintentos} intentos')
+        # Llama a la función reutilizable para subir el archivo con reintentos
+        subir_archivo_con_reintentos(
+            service=service,
+            nombre_archivo=nombre_archivo,
+            path_completo_archivo=path_completo_archivo,
+            drive_id=drive_id,
+            max_reintentos=max_reintentos,
+            tiempo_espera=tiempo_espera,
+            logger=logger,
+            borrar_despues=borrar_despues
+        )
     else:
         logger.error("No se pudo conectar a Google Drive. Verifica las credenciales.")
         print("ERROR: No se pudo conectar a Google Drive")
