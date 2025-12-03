@@ -14,12 +14,16 @@
         "archivos_temporales": "/home/rsa/projects/acelerografo/tmp-files/"
     },
     "drive": {
-        "registro_continuo": "token_registro_continuo",
-        "archivos_mseed": "token_archivos_mseed",
-        "eventos_extraidos": "token_eventos_extraidos",
-        "archivos_temporales": "token_archivos_temporales",
-        "archivos_registro": "token_log_files",
-        "max_reintentos": 5,
-        "tiempo_espera": 2
+        "carpetas": {
+            "continuos_id": "1Be03HDR...",
+            "mseed_id": "....",
+            "events_id": "....",
+            "tmp_id": "....",
+            "logs_id": "...."
+        },
+        "config": {
+            "max_reintentos": 5,
+            "tiempo_espera": 2
+        }
     }
 }

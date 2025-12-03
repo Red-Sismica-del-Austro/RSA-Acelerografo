@@ -1,3 +1,45 @@
+"""
+Script para subir archivos a Google Drive
+
+EJEMPLOS DE USO:
+
+python3 subir_archivo.py --continuous archivo.dat      # Sube archivo de registro continuo
+python3 subir_archivo.py --mseed archivo.mseed          # Sube archivo miniSEED procesado
+python3 subir_archivo.py --event evento.dat             # Sube archivo de evento extraído
+python3 subir_archivo.py --tmp temporal.tmp             # Sube archivo temporal
+python3 subir_archivo.py --log sistema.log              # Sube archivo de log
+
+MODOS DISPONIBLES:
+
+--continuous : Archivos de registro continuo (.dat)
+               Directorio: directorios.registro_continuo
+               Drive ID: drive.carpetas.continuos_id
+
+--mseed      : Archivos miniSEED procesados (.mseed)
+               Directorio: directorios.archivos_mseed
+               Drive ID: drive.carpetas.mseed_id
+
+--event      : Archivos de eventos extraídos (.dat)
+               Directorio: directorios.eventos_extraidos
+               Drive ID: drive.carpetas.events_id
+
+--tmp        : Archivos temporales (.tmp)
+               Directorio: directorios.archivos_temporales
+               Drive ID: drive.carpetas.tmp_id
+
+--log        : Archivos de log (.log)
+               Directorio: log-files/ (hardcodeado)
+               Drive ID: drive.carpetas.logs_id
+
+REQUISITOS:
+
+- Variable de entorno PROJECT_LOCAL_ROOT debe estar definida
+- Archivos de configuración necesarios:
+    * configuracion_dispositivo.json (con estructura drive.carpetas)
+    * drive_credentials.json
+    * drive_token.json
+"""
+
 ######################################### ~Librerias~ #################################################
 from __future__ import print_function
 from googleapiclient import errors
@@ -130,14 +172,65 @@ def obtener_logger(id_estacion, log_directory, log_filename):
 ############################################ ~Main~ ###################################################
 def main():
 
-    # Lee los parametros de entrada: <nombre_archivo> <tipo_archivo>
+    # Mapeo de modos de archivo
+    MODOS = {
+        'continuous': {
+            'dir_key': 'registro_continuo',
+            'drive_key': 'continuos_id',
+            'descripcion': 'Archivos de registro continuo'
+        },
+        'mseed': {
+            'dir_key': 'archivos_mseed',
+            'drive_key': 'mseed_id',
+            'descripcion': 'Archivos miniSEED procesados'
+        },
+        'event': {
+            'dir_key': 'eventos_extraidos',
+            'drive_key': 'events_id',
+            'descripcion': 'Archivos de eventos extraídos'
+        },
+        'tmp': {
+            'dir_key': 'archivos_temporales',
+            'drive_key': 'tmp_id',
+            'descripcion': 'Archivos temporales'
+        },
+        'log': {
+            'dir_key': 'log_directory',
+            'drive_key': 'logs_id',
+            'descripcion': 'Archivos de log'
+        }
+    }
 
+    # Validar argumentos
     if len(sys.argv) != 3:
-        print("Uso: subir_archivo_drive.py <nombre_archivo> <tipo_archivo: 1.Registro continuo 2.Evento extraido 3.mseed>")
+        print("Uso: subir_archivo.py --<modo> <nombre_archivo>")
+        print("\nModos disponibles:")
+        for modo, info in MODOS.items():
+            print(f"  --{modo:<12} {info['descripcion']}")
+        print("\nEjemplos:")
+        print("  python3 subir_archivo.py --continuous archivo.dat")
+        print("  python3 subir_archivo.py --mseed archivo.mseed")
+        print("  python3 subir_archivo.py --event evento.dat")
+        print("  python3 subir_archivo.py --tmp temporal.tmp")
+        print("  python3 subir_archivo.py --log sistema.log")
         return
 
-    nombre_archivo = sys.argv[1]
-    tipo_archivo = sys.argv[2]
+    modo_arg = sys.argv[1]
+    nombre_archivo = sys.argv[2]
+
+    # Validar que el argumento comience con --
+    if not modo_arg.startswith('--'):
+        print(f"Error: El modo debe comenzar con '--'. Recibido: {modo_arg}")
+        return
+
+    # Extraer el modo sin el prefijo --
+    modo = modo_arg[2:]
+
+    # Validar que el modo sea válido
+    if modo not in MODOS:
+        print(f"Error: Modo '{modo}' no válido.")
+        print(f"Modos disponibles: {', '.join(['--' + m for m in MODOS.keys()])}")
+        return
 
     # Obtiene la variable de entorno para definir la ruta del archivo de configuración
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
@@ -157,53 +250,31 @@ def main():
         print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
         return
 
-    # Obtener rutas desde configuracion_dispositivo.json
-    path_registro_continuo = config_dispositivo.get("directorios", {}).get("registro_continuo", "")
-    path_archivos_mseed = config_dispositivo.get("directorios", {}).get("archivos_mseed", "")
-    path_eventos_extraidos = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "")
-    
-    # Obtener IDs de carpetas de Drive
-    drive_id_registro_continuo = config_dispositivo.get("drive", {}).get("registro_continuo", "")
-    drive_id_eventos_extraidos = config_dispositivo.get("drive", {}).get("eventos_extraidos", "")
-
     # Obtener ID de la estación
     id_estacion = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
 
-    # Determinar ruta y carpeta de Drive según el tipo de archivo
-    if tipo_archivo == '1':
-        # Archivos registro continuo
-        if not path_registro_continuo:
-            print("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
-            return
-        if not drive_id_registro_continuo:
-            print("No se encontró el ID de Drive 'registro_continuo' en configuracion_dispositivo.json")
-            return
-        path_file = path_registro_continuo
-        drive_id = drive_id_registro_continuo
-    elif tipo_archivo == '2':
-        # Archivos eventos extraidos
-        if not path_eventos_extraidos:
-            print("No se encontró la ruta 'eventos_extraidos' en configuracion_dispositivo.json")
-            return
-        if not drive_id_eventos_extraidos:
-            print("No se encontró el ID de Drive 'eventos_extraidos' en configuracion_dispositivo.json")
-            return
-        path_file = path_eventos_extraidos
-        drive_id = drive_id_eventos_extraidos
-    elif tipo_archivo == '3':
-        # Archivos mseed
-        if not path_archivos_mseed:
-            print("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
-            return
-        if not drive_id_registro_continuo:
-            print("No se encontró el ID de Drive 'registro_continuo' en configuracion_dispositivo.json")
-            return
-        path_file = path_archivos_mseed
-        drive_id = drive_id_registro_continuo
+    # Obtener información del modo seleccionado
+    modo_info = MODOS[modo]
+    dir_key = modo_info['dir_key']
+    drive_key = modo_info['drive_key']
+
+    # Obtener ruta del directorio
+    if dir_key == 'log_directory':
+        # log_directory es hardcodeado
+        path_file = log_directory
     else:
-        print(f"Tipo de archivo no soportado: {tipo_archivo}")
+        path_file = config_dispositivo.get("directorios", {}).get(dir_key, "")
+        if not path_file:
+            print(f"Error: No se encontró la ruta '{dir_key}' en configuracion_dispositivo.json")
+            return
+
+    # Obtener ID de carpeta de Drive
+    drive_id = config_dispositivo.get("drive", {}).get("carpetas", {}).get(drive_key, "")
+    if not drive_id:
+        print(f"Error: No se encontró el ID de Drive '{drive_key}' en configuracion_dispositivo.json")
         return
 
+    # Construir ruta completa del archivo
     path_completo_archivo = os.path.join(path_file, nombre_archivo)
         
     # Obtiene el directorio de logs y lo crea si no existe
