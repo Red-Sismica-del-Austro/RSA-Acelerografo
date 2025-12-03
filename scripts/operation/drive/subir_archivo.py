@@ -9,6 +9,11 @@ python3 subir_archivo.py --event evento.dat             # Sube archivo de evento
 python3 subir_archivo.py --tmp temporal.tmp             # Sube archivo temporal
 python3 subir_archivo.py --log sistema.log              # Sube archivo de log
 
+PARÁMETRO OPCIONAL:
+
+--delete    : Borra el archivo local después de confirmar la subida exitosa a Google Drive
+              Ejemplo: python3 subir_archivo.py --mseed archivo.mseed --delete
+
 MODOS DISPONIBLES:
 
 --continuous : Archivos de registro continuo (.dat)
@@ -233,21 +238,26 @@ def main():
     }
 
     # Validar argumentos
-    if len(sys.argv) != 3:
-        print("Uso: subir_archivo.py --<modo> <nombre_archivo>")
+    if len(sys.argv) < 3:
+        print("Uso: subir_archivo.py --<modo> <nombre_archivo> [--delete]")
         print("\nModos disponibles:")
         for modo, info in MODOS.items():
             print(f"  --{modo:<12} {info['descripcion']}")
+        print("\nParámetros opcionales:")
+        print("  --delete      Borra el archivo local después de subirlo exitosamente")
         print("\nEjemplos:")
         print("  python3 subir_archivo.py --continuous archivo.dat")
-        print("  python3 subir_archivo.py --mseed archivo.mseed")
+        print("  python3 subir_archivo.py --mseed archivo.mseed --delete")
         print("  python3 subir_archivo.py --event evento.dat")
         print("  python3 subir_archivo.py --tmp temporal.tmp")
-        print("  python3 subir_archivo.py --log sistema.log")
+        print("  python3 subir_archivo.py --log sistema.log --delete")
         return
 
     modo_arg = sys.argv[1]
     nombre_archivo = sys.argv[2]
+
+    # Verificar si se pasó el parámetro --delete
+    borrar_despues = "--delete" in sys.argv
 
     # Validar que el argumento comience con --
     if not modo_arg.startswith('--'):
@@ -349,6 +359,16 @@ def main():
                     archivo_subido = True
                     logger.info(f'Archivo {nombre_archivo} subido correctamente a Google Drive en el intento {intento}')
                     print(f'Archivo {nombre_archivo} subido correctamente a Google Drive')
+
+                    # Si se especificó --delete, borrar el archivo local
+                    if borrar_despues:
+                        try:
+                            os.remove(path_completo_archivo)
+                            logger.info(f'Archivo local {nombre_archivo} borrado exitosamente después de la subida')
+                            print(f'Archivo local {nombre_archivo} borrado exitosamente')
+                        except Exception as e:
+                            logger.error(f'Error al borrar el archivo local {nombre_archivo}: {str(e)}')
+                            print(f'ADVERTENCIA: No se pudo borrar el archivo local: {str(e)}')
                 else:
                     logger.warning(f'Intento {intento} fallido: No se recibió confirmación de subida')
                     if intento < max_reintentos:
