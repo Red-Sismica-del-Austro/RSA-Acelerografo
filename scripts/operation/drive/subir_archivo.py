@@ -1,5 +1,5 @@
 """
-Script para subir archivos a Google Drive
+Script para subir archivos a Google Drive con sistema de reintentos configurable
 
 EJEMPLOS DE USO:
 
@@ -31,13 +31,39 @@ MODOS DISPONIBLES:
                Directorio: log-files/ (hardcodeado)
                Drive ID: drive.carpetas.logs_id
 
+SISTEMA DE REINTENTOS:
+
+El script implementa reintentos automáticos en caso de fallos durante la subida:
+- Número de reintentos: Configurado en drive.config.max_reintentos (por defecto: 3)
+- Tiempo de espera entre reintentos: Configurado en drive.config.tiempo_espera (por defecto: 2 segundos)
+- Logging detallado de cada intento
+- Espera exponencial entre reintentos para evitar sobrecarga
+
 REQUISITOS:
 
 - Variable de entorno PROJECT_LOCAL_ROOT debe estar definida
 - Archivos de configuración necesarios:
-    * configuracion_dispositivo.json (con estructura drive.carpetas)
+    * configuracion_dispositivo.json (con estructura drive.carpetas y drive.config)
     * drive_credentials.json
     * drive_token.json
+
+ESTRUCTURA JSON REQUERIDA:
+
+{
+  "drive": {
+    "carpetas": {
+      "continuos_id": "...",
+      "mseed_id": "...",
+      "events_id": "...",
+      "tmp_id": "...",
+      "logs_id": "..."
+    },
+    "config": {
+      "max_reintentos": 5,
+      "tiempo_espera": 2
+    }
+  }
+}
 """
 
 ######################################### ~Librerias~ #################################################
@@ -95,13 +121,18 @@ def get_authenticated(SCOPES, credential_file, token_file, service_name = 'drive
 
 # Metodo que permite subir un archivo a la cuenta de Drive
 def insert_file(service, name, description, parent_id, mime_type, filename):
+    # MODO TEST: Descomentar las siguientes líneas para simular fallos
+    #import random
+    #if random.random() < 0.7:  # 70% de probabilidad de fallo
+    #    raise Exception("Simulación de error de red")
+
     media_body = MediaFileUpload(filename, mimetype = mime_type, chunksize=-1, resumable = True)
     body = {
         'name': name,
         'description': description,
         'mimeType': mime_type
     }
-        
+
     # Si se recibe la ID de la carpeta superior, la coloca
     if parent_id:
         body['parents'] = [parent_id]
@@ -113,9 +144,9 @@ def insert_file(service, name, description, parent_id, mime_type, filename):
             body = body,
             media_body = media_body,
             fields='id').execute()
-            
+
         return file
-            
+
     except errors.HttpError as error:
         print('An error occurred: %s' % error)
         return None
@@ -253,6 +284,10 @@ def main():
     # Obtener ID de la estación
     id_estacion = config_dispositivo.get("dispositivo", {}).get("id", "Unknown")
 
+    # Obtener configuración de reintentos y tiempo de espera
+    max_reintentos = config_dispositivo.get("drive", {}).get("config", {}).get("max_reintentos", 3)
+    tiempo_espera = config_dispositivo.get("drive", {}).get("config", {}).get("tiempo_espera", 2)
+
     # Obtener información del modo seleccionado
     modo_info = MODOS[modo]
     dir_key = modo_info['dir_key']
@@ -290,20 +325,53 @@ def main():
         logger.error("El archivo %s no existe. Terminando el programa." % path_completo_archivo)
         return
 
-    #Llama al metodo para intentar conectarse a Google Drive
+    # Llama al metodo para intentar conectarse a Google Drive
     service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
-    
+
     if isConecctedDrive == True:
-        # Llama al metodo para subir el archivo a Google Drive
-        try:
-            print('Subiendo el archivo: %s' %path_completo_archivo)
-            file_uploaded = insert_file(service, nombre_archivo, nombre_archivo, drive_id, 'text/plain', path_completo_archivo)
-            logger.info(f'Archivo {nombre_archivo} subido correctamente a Google Drive')
-            print('Archivo ' + nombre_archivo + ' subido correctamente a Google Drive')
-        except Exception as e:
-            # Llama al metodo para guardar el evento ocurrido en el archivo
-            logger.error(f'Error subiendo el archivo {nombre_archivo} a Google Drive. Codigo: {str(e)}')
-            print('Error subiendo el archivo a Google Drive')
+        # Llama al metodo para subir el archivo a Google Drive con reintentos
+        intento = 0
+        archivo_subido = False
+
+        while intento < max_reintentos and not archivo_subido:
+            intento += 1
+            try:
+                if intento == 1:
+                    logger.info(f'Subiendo el archivo: {nombre_archivo}')
+                    print(f'Subiendo el archivo: {path_completo_archivo}')
+                else:
+                    logger.info(f'Reintento {intento}/{max_reintentos} para subir el archivo: {nombre_archivo}')
+                    print(f'Reintento {intento}/{max_reintentos}...')
+
+                file_uploaded = insert_file(service, nombre_archivo, nombre_archivo, drive_id, 'text/plain', path_completo_archivo)
+
+                if file_uploaded:
+                    archivo_subido = True
+                    logger.info(f'Archivo {nombre_archivo} subido correctamente a Google Drive en el intento {intento}')
+                    print(f'Archivo {nombre_archivo} subido correctamente a Google Drive')
+                else:
+                    logger.warning(f'Intento {intento} fallido: No se recibió confirmación de subida')
+                    if intento < max_reintentos:
+                        logger.info(f'Esperando {tiempo_espera} segundos antes del siguiente intento...')
+                        print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
+                        time.sleep(tiempo_espera)
+
+            except Exception as e:
+                logger.error(f'Error en intento {intento}/{max_reintentos} subiendo {nombre_archivo}. Codigo: {str(e)}')
+                print(f'Error en intento {intento}: {str(e)}')
+
+                if intento < max_reintentos:
+                    logger.info(f'Esperando {tiempo_espera} segundos antes del siguiente intento...')
+                    print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
+                    time.sleep(tiempo_espera)
+
+        # Verificar resultado final
+        if not archivo_subido:
+            logger.error(f'No se pudo subir el archivo {nombre_archivo} después de {max_reintentos} intentos')
+            print(f'ERROR: No se pudo subir el archivo después de {max_reintentos} intentos')
+    else:
+        logger.error("No se pudo conectar a Google Drive. Verifica las credenciales.")
+        print("ERROR: No se pudo conectar a Google Drive")
     
 
 #######################################################################################################
