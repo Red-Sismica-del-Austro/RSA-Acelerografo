@@ -84,6 +84,9 @@ import time
 import sys
 import json
 import logging
+
+# Importar el gestor de estado de subidas
+from drive_status_manager import marcar_como_fallido, marcar_como_exitoso
 #######################################################################################################
 
 
@@ -97,7 +100,8 @@ SCOPES = 'https://www.googleapis.com/auth/drive'
 ######################################### ~Funciones~ #################################################
 
 def subir_archivo_con_reintentos(service, nombre_archivo, path_completo_archivo, drive_id,
-                                  max_reintentos, tiempo_espera, logger, borrar_despues=False):
+                                  max_reintentos, tiempo_espera, logger, borrar_despues=False,
+                                  tipo_archivo=None, log_directory=None):
     """
     Función reutilizable para subir un archivo a Google Drive con sistema de reintentos.
 
@@ -110,6 +114,8 @@ def subir_archivo_con_reintentos(service, nombre_archivo, path_completo_archivo,
         tiempo_espera: Segundos de espera entre reintentos
         logger: Objeto logger para registro
         borrar_despues: Si True, borra el archivo local después de subida exitosa
+        tipo_archivo: Tipo de archivo ("mseed", "dat", "tmp", "log") para el registro de fallos
+        log_directory: Directorio de logs donde guardar el JSON de fallos
 
     Retorna:
         True si la subida fue exitosa, False en caso contrario
@@ -159,10 +165,24 @@ def subir_archivo_con_reintentos(service, nombre_archivo, path_completo_archivo,
                 print(f'Esperando {tiempo_espera} segundos antes de reintentar...')
                 time.sleep(tiempo_espera)
 
-    # Verificar resultado final
+    # Verificar resultado final y actualizar registro de fallos
     if not archivo_subido:
         logger.error(f'No se pudo subir el archivo {nombre_archivo} después de {max_reintentos} intentos')
         print(f'ERROR: No se pudo subir el archivo después de {max_reintentos} intentos')
+
+        # Marcar archivo como fallido en el JSON
+        if tipo_archivo and log_directory:
+            try:
+                marcar_como_fallido(log_directory, nombre_archivo, tipo_archivo, max_reintentos, logger)
+            except Exception as e:
+                logger.error(f'Error al marcar archivo como fallido en JSON: {str(e)}')
+    else:
+        # Marcar archivo como exitoso (remover de fallidos si existía)
+        if tipo_archivo and log_directory:
+            try:
+                marcar_como_exitoso(log_directory, nombre_archivo, tipo_archivo, logger)
+            except Exception as e:
+                logger.error(f'Error al marcar archivo como exitoso en JSON: {str(e)}')
 
     return archivo_subido
 
@@ -198,9 +218,9 @@ def get_authenticated(SCOPES, credential_file, token_file, service_name = 'drive
 # Metodo que permite subir un archivo a la cuenta de Drive
 def insert_file(service, name, description, parent_id, mime_type, filename):
     # MODO TEST: Descomentar las siguientes líneas para simular fallos
-    #import random
-    #if random.random() < 0.7:  # 70% de probabilidad de fallo
-    #    raise Exception("Simulación de error de red")
+    import random
+    if random.random() < 0.5:  # 70% de probabilidad de fallo
+        raise Exception("Simulación de error de red")
 
     media_body = MediaFileUpload(filename, mimetype = mime_type, chunksize=-1, resumable = True)
     body = {
@@ -284,27 +304,32 @@ def main():
         'continuous': {
             'dir_key': 'registro_continuo',
             'drive_key': 'continuos_id',
-            'descripcion': 'Archivos de registro continuo'
+            'descripcion': 'Archivos de registro continuo',
+            'tipo_archivo': 'dat'
         },
         'mseed': {
             'dir_key': 'archivos_mseed',
             'drive_key': 'mseed_id',
-            'descripcion': 'Archivos miniSEED procesados'
+            'descripcion': 'Archivos miniSEED procesados',
+            'tipo_archivo': 'mseed'
         },
         'event': {
             'dir_key': 'eventos_extraidos',
             'drive_key': 'events_id',
-            'descripcion': 'Archivos de eventos extraídos'
+            'descripcion': 'Archivos de eventos extraídos',
+            'tipo_archivo': 'dat'
         },
         'tmp': {
             'dir_key': 'archivos_temporales',
             'drive_key': 'tmp_id',
-            'descripcion': 'Archivos temporales'
+            'descripcion': 'Archivos temporales',
+            'tipo_archivo': 'tmp'
         },
         'log': {
             'dir_key': 'log_directory',
             'drive_key': 'logs_id',
-            'descripcion': 'Archivos de log'
+            'descripcion': 'Archivos de log',
+            'tipo_archivo': 'log'
         }
     }
 
@@ -410,6 +435,9 @@ def main():
     service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
 
     if isConecctedDrive == True:
+        # Obtener tipo de archivo del modo seleccionado
+        tipo_archivo = modo_info.get('tipo_archivo', None)
+
         # Llama a la función reutilizable para subir el archivo con reintentos
         subir_archivo_con_reintentos(
             service=service,
@@ -419,7 +447,9 @@ def main():
             max_reintentos=max_reintentos,
             tiempo_espera=tiempo_espera,
             logger=logger,
-            borrar_despues=borrar_despues
+            borrar_despues=borrar_despues,
+            tipo_archivo=tipo_archivo,
+            log_directory=log_directory
         )
     else:
         logger.error("No se pudo conectar a Google Drive. Verifica las credenciales.")

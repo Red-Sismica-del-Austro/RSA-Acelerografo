@@ -25,5 +25,26 @@
             "max_reintentos": 5,
             "tiempo_espera": 2
         }
+    },
+    "gestion_almacenamiento": {
+        "umbrales": {
+            "minimo": 10,
+            "critico": 5
+        },  
+        "politicas": {
+            "online": {
+                "subir": ["mseed"],
+                "retener_dias": {"dat": 30, "mseed_subidos": 7}
+            },
+            "offline": {
+                "subir": [],
+                "retener_dias": {"dat": 7}
+            },
+            "test": {
+                "subir": ["mseed", "dat"],
+                "retener_dias": null,
+                "eliminar": false
+            }
+        }
     }
 }
