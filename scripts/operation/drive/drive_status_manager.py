@@ -5,13 +5,18 @@ Este módulo maneja un archivo JSON que registra los archivos que fallaron
 al subirse a Google Drive, permitiendo protegerlos de ser borrados por
 el gestor de archivos.
 
-Estructura del JSON:
+Estructura del JSON (organizada por MODO/PROPÓSITO del archivo):
 {
   "archivos_fallidos": {
+    "continuous": {
+      "registro_2025-12-10.dat": {"fecha": "2025-12-10 15:00:00", "intentos": 5}
+    },
     "mseed": {
       "archivo.mseed": {"fecha": "2025-12-10 15:00:00", "intentos": 5}
     },
-    "dat": {},
+    "event": {
+      "evento_2025-12-10.mseed": {"fecha": "2025-12-10 16:00:00", "intentos": 3}
+    },
     "tmp": {},
     "log": {}
   }
@@ -26,8 +31,8 @@ from threading import Lock
 # Lock para operaciones thread-safe
 _file_lock = Lock()
 
-# Tipos de archivo soportados
-TIPOS_ARCHIVO = ["mseed", "dat", "tmp", "log"]
+# Tipos de archivo soportados (por modo/propósito)
+TIPOS_ARCHIVO = ["continuous", "mseed", "event", "tmp", "log"]
 
 
 def _obtener_ruta_json(log_directory):
@@ -39,8 +44,9 @@ def _inicializar_estructura():
     """Retorna la estructura inicial del JSON"""
     return {
         "archivos_fallidos": {
+            "continuous": {},
             "mseed": {},
-            "dat": {},
+            "event": {},
             "tmp": {},
             "log": {}
         }
@@ -116,7 +122,7 @@ def marcar_como_fallido(log_directory, nombre_archivo, tipo_archivo, intentos, l
     Args:
         log_directory: Directorio donde se guarda el JSON
         nombre_archivo: Nombre del archivo que falló
-        tipo_archivo: Tipo de archivo ("mseed", "dat", "tmp", "log")
+        tipo_archivo: Tipo de archivo ("continuous", "mseed", "event", "tmp", "log")
         intentos: Número de intentos realizados
         logger: Logger opcional para registrar la operación
     """
@@ -145,7 +151,7 @@ def marcar_como_exitoso(log_directory, nombre_archivo, tipo_archivo, logger=None
     Args:
         log_directory: Directorio donde se guarda el JSON
         nombre_archivo: Nombre del archivo que se subió exitosamente
-        tipo_archivo: Tipo de archivo ("mseed", "dat", "tmp", "log")
+        tipo_archivo: Tipo de archivo ("continuous", "mseed", "event", "tmp", "log")
         logger: Logger opcional para registrar la operación
     """
     if tipo_archivo not in TIPOS_ARCHIVO:
@@ -170,7 +176,7 @@ def esta_protegido(log_directory, nombre_archivo, tipo_archivo):
     Args:
         log_directory: Directorio donde se guarda el JSON
         nombre_archivo: Nombre del archivo a verificar
-        tipo_archivo: Tipo de archivo ("mseed", "dat", "tmp", "log")
+        tipo_archivo: Tipo de archivo ("continuous", "mseed", "event", "tmp", "log")
 
     Returns:
         bool: True si el archivo está en la lista de fallidos, False si puede borrarse

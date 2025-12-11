@@ -114,7 +114,7 @@ def subir_archivo_con_reintentos(service, nombre_archivo, path_completo_archivo,
         tiempo_espera: Segundos de espera entre reintentos
         logger: Objeto logger para registro
         borrar_despues: Si True, borra el archivo local después de subida exitosa
-        tipo_archivo: Tipo de archivo ("mseed", "dat", "tmp", "log") para el registro de fallos
+        tipo_archivo: Tipo de archivo ("continuous", "mseed", "event", "tmp", "log") para el registro de fallos
         log_directory: Directorio de logs donde guardar el JSON de fallos
 
     Retorna:
@@ -218,9 +218,9 @@ def get_authenticated(SCOPES, credential_file, token_file, service_name = 'drive
 # Metodo que permite subir un archivo a la cuenta de Drive
 def insert_file(service, name, description, parent_id, mime_type, filename):
     # MODO TEST: Descomentar las siguientes líneas para simular fallos
-    import random
-    if random.random() < 0.5:  # 70% de probabilidad de fallo
-        raise Exception("Simulación de error de red")
+    #import random
+    #if random.random() < 0.9:  #% de probabilidad de fallo
+    #    raise Exception("Simulación de error de red")
 
     media_body = MediaFileUpload(filename, mimetype = mime_type, chunksize=-1, resumable = True)
     body = {
@@ -305,7 +305,7 @@ def main():
             'dir_key': 'registro_continuo',
             'drive_key': 'continuos_id',
             'descripcion': 'Archivos de registro continuo',
-            'tipo_archivo': 'dat'
+            'tipo_archivo': 'continuous'
         },
         'mseed': {
             'dir_key': 'archivos_mseed',
@@ -317,7 +317,7 @@ def main():
             'dir_key': 'eventos_extraidos',
             'drive_key': 'events_id',
             'descripcion': 'Archivos de eventos extraídos',
-            'tipo_archivo': 'dat'
+            'tipo_archivo': 'event'
         },
         'tmp': {
             'dir_key': 'archivos_temporales',

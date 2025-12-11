@@ -34,14 +34,14 @@
         "politicas": {
             "online": {
                 "subir": ["mseed"],
-                "retener_dias": {"dat": 30, "mseed_subidos": 7}
+                "retener_dias": {"continuous": 30, "mseed": 30}
             },
             "offline": {
                 "subir": [],
-                "retener_dias": {"dat": 7}
+                "retener_dias": {"continuous": 7}
             },
             "test": {
-                "subir": ["mseed", "dat"],
+                "subir": ["continuous", "mseed"],
                 "retener_dias": null,
                 "eliminar": false
             }
