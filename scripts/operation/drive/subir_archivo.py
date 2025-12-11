@@ -9,10 +9,15 @@ python3 subir_archivo.py --event evento.dat             # Sube archivo de evento
 python3 subir_archivo.py --tmp temporal.tmp             # Sube archivo temporal
 python3 subir_archivo.py --log sistema.log              # Sube archivo de log
 
-PARÁMETRO OPCIONAL:
+PARÁMETROS OPCIONALES:
 
 --delete    : Borra el archivo local después de confirmar la subida exitosa a Google Drive
               Ejemplo: python3 subir_archivo.py --mseed archivo.mseed --delete
+
+--test      : Activa modo de prueba que simula fallos de red (90% de probabilidad de fallo)
+              Útil para verificar el sistema de reintentos y registro de archivos fallidos
+              Ejemplo: python3 subir_archivo.py --mseed archivo.mseed --test
+              Ejemplo: python3 subir_archivo.py --event evento.dat --delete --test
 
 MODOS DISPONIBLES:
 
@@ -94,6 +99,8 @@ from drive_status_manager import marcar_como_fallido, marcar_como_exitoso
 loggers = {}
 isConecctedDrive = False
 SCOPES = 'https://www.googleapis.com/auth/drive'
+TEST_MODE = False  # Modo de prueba para simular fallos
+TEST_FAILURE_PROBABILITY = 0.9  # Probabilidad de fallo en modo test
 #######################################################################################################
 
 
@@ -217,10 +224,12 @@ def get_authenticated(SCOPES, credential_file, token_file, service_name = 'drive
 
 # Metodo que permite subir un archivo a la cuenta de Drive
 def insert_file(service, name, description, parent_id, mime_type, filename):
-    # MODO TEST: Descomentar las siguientes líneas para simular fallos
-    #import random
-    #if random.random() < 0.9:  #% de probabilidad de fallo
-    #    raise Exception("Simulación de error de red")
+    # MODO TEST: Simular fallos si está activado
+    global TEST_MODE, TEST_FAILURE_PROBABILITY
+    if TEST_MODE:
+        import random
+        if random.random() < TEST_FAILURE_PROBABILITY:
+            raise Exception("Simulación de error de red")
 
     media_body = MediaFileUpload(filename, mimetype = mime_type, chunksize=-1, resumable = True)
     body = {
@@ -335,25 +344,38 @@ def main():
 
     # Validar argumentos
     if len(sys.argv) < 3:
-        print("Uso: subir_archivo.py --<modo> <nombre_archivo> [--delete]")
+        print("Uso: subir_archivo.py --<modo> <nombre_archivo> [--delete] [--test]")
         print("\nModos disponibles:")
         for modo, info in MODOS.items():
             print(f"  --{modo:<12} {info['descripcion']}")
         print("\nParámetros opcionales:")
         print("  --delete      Borra el archivo local después de subirlo exitosamente")
+        print("  --test        Activa modo de prueba (simula fallos de red con 90% de probabilidad)")
         print("\nEjemplos:")
         print("  python3 subir_archivo.py --continuous archivo.dat")
         print("  python3 subir_archivo.py --mseed archivo.mseed --delete")
-        print("  python3 subir_archivo.py --event evento.dat")
-        print("  python3 subir_archivo.py --tmp temporal.tmp")
+        print("  python3 subir_archivo.py --event evento.dat --test")
+        print("  python3 subir_archivo.py --tmp temporal.tmp --delete --test")
         print("  python3 subir_archivo.py --log sistema.log --delete")
         return
 
     modo_arg = sys.argv[1]
     nombre_archivo = sys.argv[2]
 
-    # Verificar si se pasó el parámetro --delete
+    # Verificar parámetros opcionales
     borrar_despues = "--delete" in sys.argv
+
+    # Activar modo test si se especifica
+    global TEST_MODE
+    test_mode_activado = "--test" in sys.argv
+    if test_mode_activado:
+        TEST_MODE = True
+        print("\n" + "="*70)
+        print("MODO TEST ACTIVADO")
+        print("="*70)
+        print(f"Simulando fallos de red con {TEST_FAILURE_PROBABILITY*100:.0f}% de probabilidad")
+        print("Este modo es útil para probar el sistema de reintentos")
+        print("="*70 + "\n")
 
     # Validar que el argumento comience con --
     if not modo_arg.startswith('--'):
@@ -424,6 +446,10 @@ def main():
 
     # Inicializa el logger
     logger = obtener_logger(id_estacion, log_directory, "drive.log")
+
+    # Registrar si el modo test está activado
+    if test_mode_activado:
+        logger.warning(f"MODO TEST ACTIVADO: Se simularán fallos de red con {TEST_FAILURE_PROBABILITY*100:.0f}% de probabilidad")
 
     # Verifica si el archivo existe
     if not os.path.isfile(path_completo_archivo):

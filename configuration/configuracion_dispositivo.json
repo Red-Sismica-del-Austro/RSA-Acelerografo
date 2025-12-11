@@ -43,7 +43,8 @@
             "test": {
                 "subir": ["continuous", "mseed"],
                 "retener_dias": null,
-                "eliminar": false
+                "modo_test": "online",
+                "umbral_test": 10
             }
         }
     }
