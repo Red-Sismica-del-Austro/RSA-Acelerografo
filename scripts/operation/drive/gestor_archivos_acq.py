@@ -2,9 +2,12 @@
 Gestor de archivos para sistema de adquisición de datos sísmicos
 
 DESCRIPCIÓN:
-Script que gestiona archivos binarios y miniSEED según el modo de adquisición:
-- Modo offline: Gestiona espacio eliminando archivos binarios antiguos
-- Modo online: Sube archivos miniSEED a Google Drive automáticamente
+Script que gestiona archivos binarios y miniSEED según el modo de adquisición configurado.
+Implementa políticas de gestión de almacenamiento basadas en dos modos de operación:
+
+MODOS DE OPERACIÓN:
+- online: Sube archivos a Google Drive, aplica retención temporal y control de espacio
+- offline: Maximiza almacenamiento local, retiene solo archivos continuous necesarios
 
 USO:
     python3 gestor_archivos_acq.py              # Ejecución normal
@@ -12,20 +15,22 @@ USO:
 
 MODO DRY-RUN:
 El parámetro --dry-run permite simular todas las operaciones sin realizar cambios:
-- No borra archivos locales
-- No sube archivos a Google Drive
-- Muestra qué operaciones se ejecutarían
+- NO borra archivos locales
+- NO sube archivos a Google Drive
+- Registra en archivo separado: gestor_acq_dry-run.log
+- Muestra qué operaciones se ejecutarían (prefijo [DRY-RUN])
 - Útil para verificar comportamiento antes de ejecutar en producción
+
+CONFIGURACIÓN:
+El modo de operación y políticas se configuran en configuracion_dispositivo.json:
+- dispositivo.modo_adquisicion: "online" o "offline"
+- gestion_almacenamiento.umbrales: mínimo y crítico de espacio
+- gestion_almacenamiento.politicas: configuración específica por modo
 
 REQUISITOS:
 - Variable de entorno PROJECT_LOCAL_ROOT debe estar definida
-- Archivo configuracion_dispositivo.json con:
-  * dispositivo.modo_adquisicion: "online" o "offline"
-  * directorios.registro_continuo
-  * directorios.archivos_mseed
-  * drive.carpetas.mseed_id (para modo online)
-  * drive.config.max_reintentos
-  * drive.config.tiempo_espera
+- Archivo configuracion_dispositivo.json con estructura completa
+- Credenciales de Google Drive (para modo online)
 """
 
 import os
@@ -34,6 +39,8 @@ import socket
 import json
 import logging
 import sys
+from datetime import datetime, timedelta
+import time
 
 # Importar funciones de subir_archivo.py (mismo directorio)
 from subir_archivo import (
@@ -41,6 +48,9 @@ from subir_archivo import (
     subir_archivo_con_reintentos,
     SCOPES
 )
+
+# Importar el gestor de estado de subidas
+from drive_status_manager import esta_protegido, ya_fue_subido
 
 # Configurar logging básico para mensajes tempranos
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -94,7 +104,6 @@ def delete_oldest_file(directory, extension, logger, dry_run=False):
 
     if dry_run:
         logger.info(f"[DRY-RUN] Se borraría el archivo más antiguo: {filename}")
-        print(f"[DRY-RUN] Se borraría: {filename}")
         return
 
     try:
@@ -129,20 +138,99 @@ def obtener_logger(id_estacion, log_directory, log_filename):
         logger.addHandler(file_handler)
         loggers[id_estacion] = logger
     return loggers[id_estacion]
+
+# ========== FUNCIONES AUXILIARES PARA GESTIÓN DE ARCHIVOS ==========
+
+def obtener_archivo_mas_reciente(directorio, extension):
+    """
+    Obtiene el archivo más reciente con la extensión especificada.
+
+    Args:
+        directorio: Ruta del directorio
+        extension: Extensión del archivo (ej: ".dat", ".mseed")
+
+    Returns:
+        str: Ruta completa del archivo más reciente, o None si no hay archivos
+    """
+    try:
+        archivos = [os.path.join(directorio, f) for f in os.listdir(directorio) if f.endswith(extension)]
+        if not archivos:
+            return None
+        return max(archivos, key=os.path.getmtime)
+    except Exception:
+        return None
+
+
+def calcular_antiguedad_dias(ruta_archivo):
+    """
+    Calcula la antigüedad de un archivo en días.
+
+    Args:
+        ruta_archivo: Ruta completa del archivo
+
+    Returns:
+        int: Número de días desde la última modificación
+    """
+    tiempo_modificacion = os.path.getmtime(ruta_archivo)
+    fecha_modificacion = datetime.fromtimestamp(tiempo_modificacion)
+    antiguedad = datetime.now() - fecha_modificacion
+    return antiguedad.days
+
+
+def esta_protegido_por_fallo(nombre_archivo, tipo_archivo, log_directory):
+    """
+    Verifica si un archivo está protegido por haber fallado al subirse.
+
+    Args:
+        nombre_archivo: Nombre del archivo (sin ruta)
+        tipo_archivo: Tipo de archivo ("continuous", "mseed", etc.)
+        log_directory: Directorio de logs
+
+    Returns:
+        bool: True si está protegido, False si puede borrarse
+    """
+    try:
+        return esta_protegido(log_directory, nombre_archivo, tipo_archivo)
+    except Exception:
+        return False
+
+
+def eliminar_archivo_con_verificacion(ruta_archivo, tipo_archivo, log_directory, logger, dry_run=False):
+    """
+    Elimina un archivo verificando primero si está protegido.
+
+    Args:
+        ruta_archivo: Ruta completa del archivo
+        tipo_archivo: Tipo de archivo ("continuous", "mseed", etc.)
+        log_directory: Directorio de logs
+        logger: Logger para registro
+        dry_run: Si True, solo simula la eliminación
+
+    Returns:
+        bool: True si se eliminó (o simularía eliminar), False si está protegido
+    """
+    nombre_archivo = os.path.basename(ruta_archivo)
+
+    # Verificar si está protegido
+    if esta_protegido_por_fallo(nombre_archivo, tipo_archivo, log_directory):
+        logger.info(f"Archivo protegido (fallo subida) | {tipo_archivo} | {nombre_archivo}")
+        return False
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Se borraría | {tipo_archivo} | {nombre_archivo}")
+        return True
+
+    try:
+        os.remove(ruta_archivo)
+        logger.info(f"Archivo eliminado | {tipo_archivo} | {nombre_archivo}")
+        return True
+    except Exception as e:
+        logger.error(f"Error al eliminar | {tipo_archivo} | {nombre_archivo} | {str(e)}")
+        return False
+
 #######################################################################################################
 
 def main():
-    # Verificar si se ejecuta en modo dry-run
-    dry_run = "--dry-run" in sys.argv
-
-    if dry_run:
-        print("\n" + "="*70)
-        print("MODO DRY-RUN ACTIVADO")
-        print("="*70)
-        print("Las operaciones se simularán sin realizar cambios reales.")
-        print("No se subirán archivos ni se borrarán datos.")
-        print("="*70 + "\n")
-
     # Obtiene la variable de entorno para definir la ruta del archivo de configuración:
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
     if not project_local_root:
@@ -184,9 +272,55 @@ def main():
     # Obtener umbral de espacio libre mínimo (por defecto 10%)
     min_free_space_threshold = config_dispositivo.get("dispositivo", {}).get("umbral_espacio_minimo", 10)
 
-    # Inicializa el logger
-    logger = obtener_logger(id_estacion, log_directory, "gestor_acq.log")
-    
+    # Detectar modo dry-run
+    dry_run = "--dry-run" in sys.argv
+
+    # Inicializa el logger (usa archivo separado si está en dry-run)
+    if dry_run:
+        logger = obtener_logger(id_estacion, log_directory, "gestor_acq_dry-run.log")
+        logger.warning("="*70)
+        logger.warning("MODO DRY-RUN ACTIVADO")
+        logger.warning("="*70)
+        logger.warning("Las operaciones se simularán sin realizar cambios reales.")
+        logger.warning("No se subirán archivos ni se borrarán datos.")
+        logger.warning("="*70)
+    else:
+        logger = obtener_logger(id_estacion, log_directory, "gestor_acq.log")
+
+    # ========== VALIDAR MODO DE OPERACIÓN ==========
+    # Validar modo
+    if mode_acq not in ["online", "offline"]:
+        logger.error(f"Modo de adquisición inválido: {mode_acq}. Debe ser 'online' o 'offline'")
+        return
+
+    # ========== CARGAR CONFIGURACIÓN DE GESTIÓN DE ALMACENAMIENTO ==========
+    gestion_almacenamiento = config_dispositivo.get("gestion_almacenamiento", {})
+
+    # Cargar umbrales
+    umbrales = gestion_almacenamiento.get("umbrales", {})
+    umbral_minimo = umbrales.get("minimo", 10)
+    umbral_critico = umbrales.get("critico", 5)
+
+    # Cargar políticas
+    politicas = gestion_almacenamiento.get("politicas", {})
+    politica_modo = politicas.get(mode_acq, {})
+
+    # Si no existe la política del modo, usar valores por defecto
+    if not politica_modo:
+        logger.warning(f"No se encontró política para modo '{mode_acq}'. Usando valores por defecto.")
+        if mode_acq == "online":
+            politica_modo = {
+                "subir": ["mseed"],
+                "retener_dias": {"continuous": 30, "mseed": 30}
+            }
+        elif mode_acq == "offline":
+            politica_modo = {
+                "subir": [],
+                "retener_dias": {"continuous": 7}
+            }
+
+    logger.info(f"Configuración cargada | modo: {mode_acq} | umbral_minimo: {umbral_minimo}% | umbral_critico: {umbral_critico}%")
+
     # Escanear el contenido de los directorios
     try:
         archivos_mseed = [f for f in os.listdir(mseed_directory) if f.endswith(".mseed")]
@@ -197,121 +331,363 @@ def main():
         return
     
     if mode_acq == "offline":
-        logger.info("Modo offline activado.")
-        if dry_run:
-            logger.info("[DRY-RUN] Simulando operaciones en modo offline")
+        logger.info("MODO OFFLINE ACTIVADO")
 
-        # Crear lista de rutas completas de los archivos binarios
-        binary_files = [os.path.join(binary_directory, f) for f in archivos_binarios]
-        if binary_files:
-            # Encontrar el archivo binario más reciente
-            most_recent_file = max(binary_files, key=os.path.getmtime)
-            filename_bin_recent = os.path.basename(most_recent_file)
-            logger.info(f"Archivo binario más reciente (no se borrará): {filename_bin_recent}")
+        # ========== POLÍTICA DE RETENCIÓN TEMPORAL ==========
+        retener_dias_continuous = politica_modo.get("retener_dias", {}).get("continuous", 7)
 
-            # Borrar todos los archivos excepto el más reciente
-            archivos_a_borrar = [p for p in binary_files if p != most_recent_file]
-            if dry_run:
-                logger.info(f"[DRY-RUN] Se borrarían {len(archivos_a_borrar)} archivos binarios")
-                for path_archivo in archivos_a_borrar:
-                    filename_bin = os.path.basename(path_archivo)
-                    #logger.info(f"[DRY-RUN] Se borraría: {filename_bin}")
-                    print(f"[DRY-RUN] Se borraría archivo binario: {filename_bin}")
-            else:
-                for path_archivo in archivos_a_borrar:
-                    filename_bin = os.path.basename(path_archivo)
+        # Identificar archivo continuous más reciente (está en uso)
+        archivo_mas_reciente_continuous = obtener_archivo_mas_reciente(binary_directory, ".dat")
+
+        if archivo_mas_reciente_continuous:
+            logger.info(f"Archivo más reciente protegido | continuous | {os.path.basename(archivo_mas_reciente_continuous)}")
+
+        # Listar archivos continuous
+        archivos_continuous_paths = [os.path.join(binary_directory, f) for f in archivos_binarios]
+
+        # Eliminar archivos continuous antiguos (excepto el más reciente)
+        for ruta_archivo in archivos_continuous_paths:
+            # Proteger el más reciente
+            if archivo_mas_reciente_continuous and ruta_archivo == archivo_mas_reciente_continuous:
+                continue
+
+            # Verificar antigüedad
+            antiguedad = calcular_antiguedad_dias(ruta_archivo)
+            if antiguedad > retener_dias_continuous:
+                nombre_archivo = os.path.basename(ruta_archivo)
+
+                if dry_run:
+                    logger.info(f"[DRY-RUN] Se borraría por antigüedad | continuous | {nombre_archivo} | {antiguedad} días")
+                else:
                     try:
-                        os.remove(path_archivo)
-                        logger.info(f"Archivo binario borrado: {filename_bin}")
+                        os.remove(ruta_archivo)
+                        logger.info(f"Eliminado por antigüedad | continuous | {nombre_archivo} | {antiguedad} días")
                     except Exception as e:
-                        logger.error(f"Error al borrar {filename_bin}: {e}")
-        else:
-            logger.warning("No se encontraron archivos binarios en el directorio.")
+                        logger.error(f"Error al eliminar | continuous | {nombre_archivo} | {str(e)}")
 
-        # Verificar espacio disponible en la partición donde se encuentra el directorio mseed
+        # ========== POLÍTICA DE CONTROL DE ESPACIO ==========
         free_space = get_free_space_percentage(mseed_directory)
-        logger.info(f"Espacio libre en directorio mseed: {free_space:.2f}%")
-        if free_space < min_free_space_threshold:
-            logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo mseed más antiguo.")
+        logger.info(f"Espacio libre | mseed | {free_space:.2f}%")
+
+        # Umbral mínimo
+        if free_space < umbral_minimo:
+            logger.warning(f"Espacio bajo umbral mínimo | offline | {free_space:.2f}% < {umbral_minimo}%")
+
+            # Eliminar TODOS los archivos continuous excepto el más reciente
+            archivos_continuous_paths = [os.path.join(binary_directory, f) for f in os.listdir(binary_directory) if f.endswith(".dat")]
+            for ruta_archivo in archivos_continuous_paths:
+                if archivo_mas_reciente_continuous and ruta_archivo == archivo_mas_reciente_continuous:
+                    continue
+                nombre_archivo = os.path.basename(ruta_archivo)
+
+                if dry_run:
+                    logger.info(f"[DRY-RUN] Se borraría por espacio | continuous | {nombre_archivo}")
+                else:
+                    try:
+                        os.remove(ruta_archivo)
+                        logger.info(f"Eliminado por espacio | continuous | {nombre_archivo}")
+                    except Exception as e:
+                        logger.error(f"Error al eliminar | continuous | {nombre_archivo} | {str(e)}")
+
+            # Verificar espacio nuevamente
+            free_space = get_free_space_percentage(mseed_directory)
+
+            # Si aún bajo umbral, eliminar mseed más antiguo
+            if free_space < umbral_minimo:
+                logger.warning(f"Espacio insuficiente tras eliminar continuous | offline | {free_space:.2f}%")
+                delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
+
+        # Umbral crítico
+        if free_space < umbral_critico:
+            logger.warning(f"Espacio crítico en modo offline - intervención necesaria | offline | {free_space:.2f}% < {umbral_critico}%")
+
+            # Eliminar mseed más antiguo (FIFO)
             delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
     
     elif mode_acq == "online":
-        logger.info("Modo online activado.")
-        if dry_run:
-            logger.info("[DRY-RUN] Simulando operaciones en modo online")
+        logger.info("MODO ONLINE ACTIVADO")
 
-        if check_internet_connection(logger):
-            logger.info("Conexión a internet establecida. Se procederá a subir los archivos mseed a Google Drive.")
-            if archivos_mseed:
-                # Obtener parámetros de subida desde configuración
-                max_reintentos = config_dispositivo.get("drive", {}).get("config", {}).get("max_reintentos", 3)
-                tiempo_espera = config_dispositivo.get("drive", {}).get("config", {}).get("tiempo_espera", 2)
-                drive_id = config_dispositivo.get("drive", {}).get("carpetas", {}).get("mseed_id", "")
+        # Detectar conectividad
+        tiene_conexion = check_internet_connection(logger)
 
-                if not drive_id:
-                    logger.error("No se encontró el ID de carpeta de Drive 'mseed_id' en configuracion_dispositivo.json")
-                else:
-                    if dry_run:
-                        # Modo dry-run: simular subida sin conectar a Drive
-                        logger.info(f"[DRY-RUN] Se subirían {len(archivos_mseed)} archivos a Google Drive")
-                        for archivo in archivos_mseed:
-                            #logger.info(f"[DRY-RUN] Se subiría: {archivo}")
-                            print(f"[DRY-RUN] Se subiría a Drive: {archivo}")
-                        logger.info(f"[DRY-RUN] Resumen: {len(archivos_mseed)} archivos preparados para subir")
+        if tiene_conexion:
+            logger.info("Conexión a internet | online | disponible")
+
+            # ========== POLÍTICA DE SUBIDA A DRIVE ==========
+            tipos_a_subir = politica_modo.get("subir", [])
+
+            # Preparar archivos para subir (empezar por los más antiguos)
+            archivos_para_subir = []
+            archivos_ya_subidos_count = 0
+
+            if "mseed" in tipos_a_subir:
+                archivos_mseed_paths = [os.path.join(mseed_directory, f) for f in archivos_mseed]
+                archivos_mseed_ordenados = sorted(archivos_mseed_paths, key=os.path.getmtime)
+                for path in archivos_mseed_ordenados:
+                    nombre_archivo = os.path.basename(path)
+                    # Verificar si ya fue subido
+                    if ya_fue_subido(log_directory, nombre_archivo, "mseed"):
+                        archivos_ya_subidos_count += 1
+                        logger.info(f"Archivo ya subido previamente | mseed | {nombre_archivo}")
                     else:
-                        # Obtener rutas de configuración
-                        credentials_file = os.path.join(project_local_root, "configuracion", "drive_credentials.json")
-                        token_file = os.path.join(project_local_root, "configuracion", "drive_token.json")
+                        archivos_para_subir.append((path, "mseed"))
 
-                        # Autenticar una sola vez para todos los archivos
-                        logger.info("Autenticando en Google Drive...")
-                        service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
+            if "continuous" in tipos_a_subir:
+                archivos_binarios_paths = [os.path.join(binary_directory, f) for f in archivos_binarios]
+                archivos_binarios_ordenados = sorted(archivos_binarios_paths, key=os.path.getmtime)
+                # Proteger el más reciente (está en uso)
+                archivo_mas_reciente_continuous = obtener_archivo_mas_reciente(binary_directory, ".dat")
+                for path in archivos_binarios_ordenados:
+                    nombre_archivo = os.path.basename(path)
+                    # Proteger el más reciente
+                    if archivo_mas_reciente_continuous and path == archivo_mas_reciente_continuous:
+                        continue
+                    # Verificar si ya fue subido
+                    if ya_fue_subido(log_directory, nombre_archivo, "continuous"):
+                        archivos_ya_subidos_count += 1
+                        logger.info(f"Archivo ya subido previamente | continuous | {nombre_archivo}")
+                    else:
+                        archivos_para_subir.append((path, "continuous"))
 
-                        if service:
-                            # Subir todos los archivos usando la misma conexión
-                            archivos_subidos_exitosamente = 0
-                            for archivo in archivos_mseed:
-                                path_completo = os.path.join(mseed_directory, archivo)
-                                logger.info(f"Procesando archivo: {archivo}")
+            # Registrar resumen de archivos ya subidos
+            if archivos_ya_subidos_count > 0:
+                logger.info(f"Archivos omitidos (ya subidos) | online | {archivos_ya_subidos_count} archivos")
 
-                                exito = subir_archivo_con_reintentos(
-                                    service=service,
-                                    nombre_archivo=archivo,
-                                    path_completo_archivo=path_completo,
-                                    drive_id=drive_id,
-                                    max_reintentos=max_reintentos,
-                                    tiempo_espera=tiempo_espera,
-                                    logger=logger,
-                                    borrar_despues=False
-                                )
+            # Subir archivos si hay alguno configurado
+            if archivos_para_subir:
+                if dry_run:
+                    logger.info(f"[DRY-RUN] Se subirían {len(archivos_para_subir)} archivos a Google Drive")
+                    for path_completo, tipo_archivo in archivos_para_subir:
+                        nombre_archivo = os.path.basename(path_completo)
+                        logger.info(f"[DRY-RUN] Se subiría | {tipo_archivo} | {nombre_archivo}")
+                else:
+                    logger.info(f"Archivos pendientes de subida | online | {len(archivos_para_subir)} archivos")
 
-                                if exito:
-                                    archivos_subidos_exitosamente += 1
+                    # Obtener parámetros de Drive
+                    max_reintentos = config_dispositivo.get("drive", {}).get("config", {}).get("max_reintentos", 3)
+                    tiempo_espera = config_dispositivo.get("drive", {}).get("config", {}).get("tiempo_espera", 2)
+                    credentials_file = os.path.join(project_local_root, "configuracion", "drive_credentials.json")
+                    token_file = os.path.join(project_local_root, "configuracion", "drive_token.json")
 
-                            logger.info(f"Resumen: {archivos_subidos_exitosamente}/{len(archivos_mseed)} archivos subidos exitosamente")
-                        else:
-                            logger.error("No se pudo autenticar en Google Drive. Verifica las credenciales.")
+                    # Autenticar una sola vez
+                    logger.info("Autenticando en Google Drive | online")
+                    service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
+
+                    if service:
+                        archivos_subidos = 0
+                        for path_completo, tipo_archivo in archivos_para_subir:
+                            nombre_archivo = os.path.basename(path_completo)
+
+                            # Obtener drive_id según tipo
+                            if tipo_archivo == "mseed":
+                                drive_id = config_dispositivo.get("drive", {}).get("carpetas", {}).get("mseed_id", "")
+                            elif tipo_archivo == "continuous":
+                                drive_id = config_dispositivo.get("drive", {}).get("carpetas", {}).get("continuos_id", "")
+                            else:
+                                logger.warning(f"Tipo de archivo desconocido | {tipo_archivo} | {nombre_archivo}")
+                                continue
+
+                            if not drive_id:
+                                logger.error(f"ID de carpeta Drive no encontrado | {tipo_archivo}")
+                                continue
+
+                            logger.info(f"Subiendo archivo | {tipo_archivo} | {nombre_archivo}")
+
+                            exito = subir_archivo_con_reintentos(
+                                service=service,
+                                nombre_archivo=nombre_archivo,
+                                path_completo_archivo=path_completo,
+                                drive_id=drive_id,
+                                max_reintentos=max_reintentos,
+                                tiempo_espera=tiempo_espera,
+                                logger=logger,
+                                borrar_despues=False,
+                                tipo_archivo=tipo_archivo,
+                                log_directory=log_directory
+                            )
+
+                            if exito:
+                                archivos_subidos += 1
+
+                        logger.info(f"Resumen subida | online | {archivos_subidos}/{len(archivos_para_subir)} archivos subidos")
+                    else:
+                        logger.error("Autenticación fallida | online | verificar credenciales")
             else:
-                logger.warning("No se encontraron archivos mseed en el directorio especificado.")
-        else:
-             # Si no hay conexion a internet verifica el espacio disponible
+                # No hay archivos para subir
+                if archivos_ya_subidos_count > 0:
+                    logger.info(f"Sin archivos pendientes | online | todos ya fueron subidos previamente")
+                else:
+                    logger.info(f"Sin archivos para subir | online | no hay archivos configurados para subida")
+
+            # ========== POLÍTICA DE RETENCIÓN TEMPORAL ==========
+            retener_dias = politica_modo.get("retener_dias", {})
+
+            # Identificar archivo continuous más reciente (está en uso)
+            archivo_mas_reciente_continuous = obtener_archivo_mas_reciente(binary_directory, ".dat")
+            if archivo_mas_reciente_continuous:
+                logger.info(f"Archivo más reciente protegido | continuous | {os.path.basename(archivo_mas_reciente_continuous)}")
+
+            # Eliminar continuous antiguos (excepto el más reciente y los fallidos)
+            if "continuous" in retener_dias:
+                dias_continuous = retener_dias["continuous"]
+                archivos_continuous_paths = [os.path.join(binary_directory, f) for f in archivos_binarios]
+
+                for ruta_archivo in archivos_continuous_paths:
+                    # Proteger el más reciente
+                    if archivo_mas_reciente_continuous and ruta_archivo == archivo_mas_reciente_continuous:
+                        continue
+
+                    # Verificar antigüedad
+                    antiguedad = calcular_antiguedad_dias(ruta_archivo)
+                    if antiguedad > dias_continuous:
+                        # Intentar eliminar (verifica automáticamente si está protegido)
+                        eliminado = eliminar_archivo_con_verificacion(
+                            ruta_archivo, "continuous", log_directory, logger, dry_run
+                        )
+                        if eliminado:
+                            logger.info(f"Eliminado por antigüedad | continuous | {os.path.basename(ruta_archivo)} | {antiguedad} días")
+
+            # Eliminar mseed antiguos (solo los que NO están protegidos por fallo de subida)
+            if "mseed" in retener_dias:
+                dias_mseed = retener_dias["mseed"]
+                archivos_mseed_paths = [os.path.join(mseed_directory, f) for f in archivos_mseed]
+
+                for ruta_archivo in archivos_mseed_paths:
+                    antiguedad = calcular_antiguedad_dias(ruta_archivo)
+                    if antiguedad > dias_mseed:
+                        # Intentar eliminar (verifica automáticamente si está protegido)
+                        eliminado = eliminar_archivo_con_verificacion(
+                            ruta_archivo, "mseed", log_directory, logger, dry_run
+                        )
+                        if eliminado:
+                            logger.info(f"Eliminado por antigüedad | mseed | {os.path.basename(ruta_archivo)} | {antiguedad} días")
+
+            # ========== POLÍTICA DE CONTROL DE ESPACIO ==========
             free_space = get_free_space_percentage(mseed_directory)
-            logger.info(f"Espacio libre en directorio mseed: {free_space:.2f}%")
-            if free_space < min_free_space_threshold:
-                logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo mseed más antiguo.")
-                delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
-            else:
-                logger.info("Espacio disponible suficiente en la partición.")
+            logger.info(f"Espacio libre | mseed | {free_space:.2f}%")
 
-        # Verificar espacio disponible en el directorio de archivos binarios
-        free_space = get_free_space_percentage(binary_directory)
-        logger.info(f"Espacio libre en directorio binarios: {free_space:.2f}%")
-        if free_space < min_free_space_threshold:
-            logger.warning(f"El espacio disponible es menor al {min_free_space_threshold}%. Se procederá a borrar el archivo binario más antiguo.")
-            delete_oldest_file(binary_directory, ".dat", logger)
+            # Umbral mínimo
+            if free_space < umbral_minimo:
+                logger.warning(f"Espacio bajo umbral mínimo | online | {free_space:.2f}% < {umbral_minimo}%")
+
+                # Eliminar archivos continuous antiguos (excepto el más reciente)
+                archivos_continuous_paths = [os.path.join(binary_directory, f) for f in os.listdir(binary_directory) if f.endswith(".dat")]
+                archivos_continuous_ordenados = sorted(archivos_continuous_paths, key=os.path.getmtime)
+
+                for ruta_archivo in archivos_continuous_ordenados:
+                    if archivo_mas_reciente_continuous and ruta_archivo == archivo_mas_reciente_continuous:
+                        continue
+
+                    eliminado = eliminar_archivo_con_verificacion(
+                        ruta_archivo, "continuous", log_directory, logger, dry_run
+                    )
+                    if eliminado:
+                        logger.info(f"Eliminado por espacio | continuous | {os.path.basename(ruta_archivo)}")
+
+                # Verificar espacio nuevamente
+                free_space = get_free_space_percentage(mseed_directory)
+
+                # Si aún bajo umbral, eliminar mseed más antiguo (verificando que no esté protegido)
+                if free_space < umbral_minimo:
+                    logger.warning(f"Espacio insuficiente tras eliminar continuous | online | {free_space:.2f}%")
+
+                    archivos_mseed_paths = [os.path.join(mseed_directory, f) for f in os.listdir(mseed_directory) if f.endswith(".mseed")]
+                    archivos_mseed_ordenados = sorted(archivos_mseed_paths, key=os.path.getmtime)
+
+                    for ruta_archivo in archivos_mseed_ordenados:
+                        eliminado = eliminar_archivo_con_verificacion(
+                            ruta_archivo, "mseed", log_directory, logger, dry_run
+                        )
+                        if eliminado:
+                            logger.info(f"Eliminado por espacio | mseed | {os.path.basename(ruta_archivo)}")
+                            break  # Eliminar solo uno a la vez
+
+            # Umbral crítico
+            if free_space < umbral_critico:
+                logger.warning(f"Espacio crítico | online | {free_space:.2f}% < {umbral_critico}%")
+
+                # Eliminar TODOS los continuous (excepto el más reciente)
+                archivos_continuous_paths = [os.path.join(binary_directory, f) for f in os.listdir(binary_directory) if f.endswith(".dat")]
+                for ruta_archivo in archivos_continuous_paths:
+                    if archivo_mas_reciente_continuous and ruta_archivo == archivo_mas_reciente_continuous:
+                        continue
+
+                    eliminado = eliminar_archivo_con_verificacion(
+                        ruta_archivo, "continuous", log_directory, logger, dry_run
+                    )
+                    if eliminado:
+                        logger.info(f"Eliminado por espacio crítico | continuous | {os.path.basename(ruta_archivo)}")
+
+                # Verificar espacio nuevamente
+                free_space = get_free_space_percentage(mseed_directory)
+
+                # Si aún crítico, eliminar mseed más antiguos (FIFO, verificando protección)
+                if free_space < umbral_critico:
+                    archivos_mseed_paths = [os.path.join(mseed_directory, f) for f in os.listdir(mseed_directory) if f.endswith(".mseed")]
+                    archivos_mseed_ordenados = sorted(archivos_mseed_paths, key=os.path.getmtime)
+
+                    for ruta_archivo in archivos_mseed_ordenados:
+                        eliminado = eliminar_archivo_con_verificacion(
+                            ruta_archivo, "mseed", log_directory, logger, dry_run
+                        )
+                        if eliminado:
+                            logger.info(f"Eliminado por espacio crítico | mseed | {os.path.basename(ruta_archivo)}")
+                            # Verificar si ya se alcanzó el umbral
+                            free_space = get_free_space_percentage(mseed_directory)
+                            if free_space >= umbral_critico:
+                                break
+
         else:
-            logger.info("Espacio disponible suficiente en la partición.")
-    
+            # ========== MODO ONLINE SIN CONECTIVIDAD ==========
+            logger.warning("Modo online sin conectividad | online | acumulando archivos")
+
+            # Solo aplicar control de espacio (no subir, no eliminar por retención)
+            free_space = get_free_space_percentage(mseed_directory)
+            logger.info(f"Espacio libre | mseed | {free_space:.2f}%")
+
+            # Identificar archivo continuous más reciente
+            archivo_mas_reciente_continuous = obtener_archivo_mas_reciente(binary_directory, ".dat")
+            if archivo_mas_reciente_continuous:
+                logger.info(f"Archivo más reciente protegido | continuous | {os.path.basename(archivo_mas_reciente_continuous)}")
+
+            # Umbral mínimo
+            if free_space < umbral_minimo:
+                logger.warning(f"Espacio bajo umbral mínimo | online-sin-conexión | {free_space:.2f}% < {umbral_minimo}%")
+
+                # Eliminar continuous más antiguo
+                archivos_continuous_paths = [os.path.join(binary_directory, f) for f in os.listdir(binary_directory) if f.endswith(".dat")]
+                archivos_continuous_ordenados = sorted(archivos_continuous_paths, key=os.path.getmtime)
+
+                for ruta_archivo in archivos_continuous_ordenados:
+                    if archivo_mas_reciente_continuous and ruta_archivo == archivo_mas_reciente_continuous:
+                        continue
+
+                    nombre_archivo = os.path.basename(ruta_archivo)
+
+                    if dry_run:
+                        logger.info(f"[DRY-RUN] Se borraría por espacio | continuous | {nombre_archivo}")
+                        break
+                    else:
+                        try:
+                            os.remove(ruta_archivo)
+                            logger.info(f"Eliminado por espacio | continuous | {nombre_archivo}")
+                            break
+                        except Exception as e:
+                            logger.error(f"Error al eliminar | continuous | {nombre_archivo} | {str(e)}")
+
+                # Verificar espacio nuevamente
+                free_space = get_free_space_percentage(mseed_directory)
+
+                # Si aún bajo umbral, eliminar mseed más antiguo (FIFO)
+                if free_space < umbral_minimo:
+                    logger.warning(f"Espacio insuficiente | online-sin-conexión | {free_space:.2f}%")
+                    delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
+
+            # Umbral crítico
+            if free_space < umbral_critico:
+                logger.warning(f"Espacio crítico | online-sin-conexión | {free_space:.2f}% < {umbral_critico}%")
+                delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
+
     else:
         logger.error(f"Modo de adquisición desconocido: {mode_acq}")
  

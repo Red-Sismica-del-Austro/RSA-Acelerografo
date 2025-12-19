@@ -39,12 +39,6 @@
             "offline": {
                 "subir": [],
                 "retener_dias": {"continuous": 7}
-            },
-            "test": {
-                "subir": ["continuous", "mseed"],
-                "retener_dias": null,
-                "modo_test": "online",
-                "umbral_test": 10
             }
         }
     }

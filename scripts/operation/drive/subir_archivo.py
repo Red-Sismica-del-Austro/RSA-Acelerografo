@@ -184,10 +184,12 @@ def subir_archivo_con_reintentos(service, nombre_archivo, path_completo_archivo,
             except Exception as e:
                 logger.error(f'Error al marcar archivo como fallido en JSON: {str(e)}')
     else:
-        # Marcar archivo como exitoso (remover de fallidos si existía)
+        # Marcar archivo como exitoso (registrar en exitosos y remover de fallidos si existía)
         if tipo_archivo and log_directory:
             try:
-                marcar_como_exitoso(log_directory, nombre_archivo, tipo_archivo, logger)
+                # Obtener tamaño del archivo
+                size_bytes = os.path.getsize(path_completo_archivo) if os.path.exists(path_completo_archivo) else 0
+                marcar_como_exitoso(log_directory, nombre_archivo, tipo_archivo, drive_id, size_bytes, logger)
             except Exception as e:
                 logger.error(f'Error al marcar archivo como exitoso en JSON: {str(e)}')
 
