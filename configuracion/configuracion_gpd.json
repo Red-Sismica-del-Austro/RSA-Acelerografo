@@ -6,5 +6,7 @@
   "inference_window_seconds": 60,
   "batch_size": 100,
   "num_threads": 2,
-  "enable_mqtt_publish": false
+  "enable_mqtt_publish": true,
+  "mqtt_topic_prefix": "eventos",
+  "enable_mqtt_publish_old": false
 }

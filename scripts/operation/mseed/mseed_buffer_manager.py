@@ -47,6 +47,7 @@ import signal
 from pathlib import Path
 from .gpd_inference_engine import GPDInferenceEngine
 from .seismic_pick import SeismicPick
+from .mqtt_event_publisher import MQTTEventPublisher
 #######################################################################################################
 
 ##################################### ~Constantes globales~ ############################################
@@ -532,7 +533,7 @@ class GPDInferenceThread(threading.Thread):
     """
 
     def __init__(self, buffer, engine, interval_seconds=10, window_duration=60, 
-                 picks_file=None, logger=None):
+                 picks_file=None, mqtt_publisher=None, logger=None):
         """
         Inicializa el hilo de inferencia
         """
@@ -542,6 +543,7 @@ class GPDInferenceThread(threading.Thread):
         self.interval = interval_seconds
         self.window_duration = window_duration
         self.picks_file = picks_file
+        self.mqtt_publisher = mqtt_publisher
         self.logger = logger or logging.getLogger(__name__)
         self.running = Event()
         self.running.set()
@@ -570,6 +572,7 @@ class GPDInferenceThread(threading.Thread):
                     if picks:
                         self.logger.info(f"¡Detección GPD! {len(picks)} picks encontrados en {duration:.2f}s")
                         self._save_picks(picks)
+                        self._publish_picks(picks)
                     else:
                         self.logger.debug(f"Inferencia completada en {duration:.2f}s. Sin detecciones.")
                 else:
@@ -589,6 +592,12 @@ class GPDInferenceThread(threading.Thread):
                     f.write(pick.to_line() + "\n")
         except Exception as e:
             self.logger.error(f"Error guardando picks: {e}")
+
+    def _publish_picks(self, picks):
+        """Publica los picks detectados vía MQTT"""
+        if self.mqtt_publisher:
+            for pick in picks:
+                self.mqtt_publisher.publish_pick(pick)
 
     def stop(self):
         """Detiene el hilo"""
@@ -634,10 +643,27 @@ class MiniSEEDBufferManager:
 
         # Inferencia GPD (si se proporciona configuración)
         self.inference_thread = None
+        self.mqtt_publisher = None
+        
         if self.inference_config:
             try:
                 model_path = self.inference_config.get("model_path")
                 engine = GPDInferenceEngine(model_path, self.inference_config, logger)
+                
+                # Inicializar publicador MQTT si está habilitado
+                if self.inference_config.get("enable_mqtt_publish"):
+                    project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
+                    mqtt_config_file = os.path.join(
+                        project_local_root, "configuracion", "configuracion_mqtt.json"
+                    )
+                    config_mqtt = read_fileJSON(mqtt_config_file)
+                    
+                    if config_mqtt:
+                        dispositivo_id = config_mseed.get("CODIGO(1)", "Unknown")
+                        topic_prefix = self.inference_config.get("mqtt_topic_prefix", "eventos")
+                        self.mqtt_publisher = MQTTEventPublisher(
+                            config_mqtt, dispositivo_id, topic_prefix, logger
+                        )
                 
                 # Crear hilo de inferencia
                 self.inference_thread = GPDInferenceThread(
@@ -646,6 +672,7 @@ class MiniSEEDBufferManager:
                     interval_seconds=self.inference_config.get("inference_interval_seconds", 10),
                     window_duration=self.inference_config.get("inference_window_seconds", 60),
                     picks_file=self.inference_config.get("picks_output_file"),
+                    mqtt_publisher=self.mqtt_publisher,
                     logger=logger
                 )
                 self.logger.info("Motor de inferencia GPD configurado correctamente")
@@ -759,6 +786,9 @@ class MiniSEEDBufferManager:
         
         if self.inference_thread:
             self.inference_thread.stop()
+            
+        if self.mqtt_publisher:
+            self.mqtt_publisher.stop()
 
         # Esperar a que los hilos terminen
         if self.pipe_reader.is_alive():
