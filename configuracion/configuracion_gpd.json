@@ -1,0 +1,10 @@
+{
+  "min_probability": 0.95,
+  "freq_min": 3.0,
+  "freq_max": 20.0,
+  "inference_interval_seconds": 10,
+  "inference_window_seconds": 60,
+  "batch_size": 100,
+  "num_threads": 2,
+  "enable_mqtt_publish": false
+}

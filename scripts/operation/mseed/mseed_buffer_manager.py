@@ -45,6 +45,8 @@ from collections import deque
 from threading import Lock, Event
 import signal
 from pathlib import Path
+from .gpd_inference_engine import GPDInferenceEngine
+from .seismic_pick import SeismicPick
 #######################################################################################################
 
 ##################################### ~Constantes globales~ ############################################
@@ -522,6 +524,79 @@ class CircularMiniSEEDBuffer:
 
 #######################################################################################################
 
+############################ ~Módulo 5: Hilo de Inferencia GPD~ #######################################
+class GPDInferenceThread(threading.Thread):
+    """
+    Hilo especializado en ejecutar la inferencia GPD periódicamente
+    sobre los datos contenidos en el buffer circular.
+    """
+
+    def __init__(self, buffer, engine, interval_seconds=10, window_duration=60, 
+                 picks_file=None, logger=None):
+        """
+        Inicializa el hilo de inferencia
+        """
+        super().__init__(daemon=True)
+        self.buffer = buffer
+        self.engine = engine
+        self.interval = interval_seconds
+        self.window_duration = window_duration
+        self.picks_file = picks_file
+        self.logger = logger or logging.getLogger(__name__)
+        self.running = Event()
+        self.running.set()
+
+    def run(self):
+        self.logger.info(
+            f"Hilo de inferencia GPD iniciado. Intervalo: {self.interval}s, "
+            f"Ventana: {self.window_duration}s"
+        )
+
+        while self.running.is_set():
+            try:
+                # Esperar el intervalo
+                time.sleep(self.interval)
+
+                # Extraer ventana del buffer
+                # Nota: extract_window ya usa el Lock del buffer
+                stream = self.buffer.extract_window(duration_seconds=self.window_duration)
+
+                if stream and len(stream) == 3:
+                    # Ejecutar inferencia
+                    start_inf = time.perf_counter()
+                    picks = self.engine.process_stream(stream)
+                    duration = time.perf_counter() - start_inf
+
+                    if picks:
+                        self.logger.info(f"¡Detección GPD! {len(picks)} picks encontrados en {duration:.2f}s")
+                        self._save_picks(picks)
+                    else:
+                        self.logger.debug(f"Inferencia completada en {duration:.2f}s. Sin detecciones.")
+                else:
+                    self.logger.debug("Buffer insuficiente para la ventana de inferencia")
+
+            except Exception as e:
+                self.logger.error(f"Error en hilo de inferencia: {e}", exc_info=True)
+
+    def _save_picks(self, picks):
+        """Guarda los picks en el archivo configurado"""
+        if not self.picks_file:
+            return
+
+        try:
+            with open(self.picks_file, 'a') as f:
+                for pick in picks:
+                    f.write(pick.to_line() + "\n")
+        except Exception as e:
+            self.logger.error(f"Error guardando picks: {e}")
+
+    def stop(self):
+        """Detiene el hilo"""
+        self.logger.info("Deteniendo hilo de inferencia...")
+        self.running.clear()
+
+#######################################################################################################
+
 ############################ ~Módulo 4: Coordinador Principal~ ########################################
 class MiniSEEDBufferManager:
     """
@@ -533,7 +608,8 @@ class MiniSEEDBufferManager:
     - Manejo de señales para shutdown limpio
     """
 
-    def __init__(self, config_mseed, buffer_size=1800, window_duration=60, logger=None):
+    def __init__(self, config_mseed, buffer_size=1800, window_duration=60, 
+                 inference_config=None, logger=None):
         """
         Inicializa el gestor
 
@@ -541,18 +617,40 @@ class MiniSEEDBufferManager:
             config_mseed: Configuración miniSEED
             buffer_size: Tamaño del buffer en segundos
             window_duration: Duración de ventanas para exportación
+            inference_config: Diccionario con configuración de inferencia GPD (opcional)
             logger: Logger
         """
         self.logger = logger or logging.getLogger(__name__)
         self.config_mseed = config_mseed
         self.buffer_size = buffer_size
         self.window_duration = window_duration
+        self.inference_config = inference_config
 
         # Inicializar componentes
         sampling_rate = int(config_mseed.get("MUESTREO(20)", 250))
         self.converter = TramaToMiniSEEDConverter(config_mseed, logger)
         self.buffer = CircularMiniSEEDBuffer(buffer_size, sampling_rate, logger)
         self.pipe_reader = PipeReader(PIPE_NAME, self._on_trama_received, logger)
+
+        # Inferencia GPD (si se proporciona configuración)
+        self.inference_thread = None
+        if self.inference_config:
+            try:
+                model_path = self.inference_config.get("model_path")
+                engine = GPDInferenceEngine(model_path, self.inference_config, logger)
+                
+                # Crear hilo de inferencia
+                self.inference_thread = GPDInferenceThread(
+                    buffer=self.buffer,
+                    engine=engine,
+                    interval_seconds=self.inference_config.get("inference_interval_seconds", 10),
+                    window_duration=self.inference_config.get("inference_window_seconds", 60),
+                    picks_file=self.inference_config.get("picks_output_file"),
+                    logger=logger
+                )
+                self.logger.info("Motor de inferencia GPD configurado correctamente")
+            except Exception as e:
+                self.logger.error(f"No se pudo inicializar motor de inferencia GPD: {e}")
 
         # Control de ejecución
         self.running = Event()
@@ -588,6 +686,10 @@ class MiniSEEDBufferManager:
 
         # Iniciar lector de pipe
         self.pipe_reader.start()
+
+        # Iniciar inferencia si está configurada
+        if self.inference_thread:
+            self.inference_thread.start()
 
         # Bucle principal de monitoreo
         report_interval = 60  # Reportar cada 60 segundos
@@ -654,10 +756,16 @@ class MiniSEEDBufferManager:
         self.logger.info("Deteniendo MiniSEED Buffer Manager...")
         self.running.clear()
         self.pipe_reader.stop()
+        
+        if self.inference_thread:
+            self.inference_thread.stop()
 
-        # Esperar a que el hilo termine
+        # Esperar a que los hilos terminen
         if self.pipe_reader.is_alive():
             self.pipe_reader.join(timeout=5)
+        
+        if self.inference_thread and self.inference_thread.is_alive():
+            self.inference_thread.join(timeout=5)
 
         # Imprimir estado final
         self._print_status()
@@ -731,6 +839,12 @@ def main():
                         help="Archivo de salida para ventana extraída")
     parser.add_argument("--log-level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                         default='INFO', help="Nivel de logging en consola")
+    
+    # Argumentos GPD
+    parser.add_argument("--enable-inference", action="store_true",
+                        help="Activar detección de eventos GPD en tiempo real")
+    parser.add_argument("--inference-config", type=str,
+                        help="Ruta al archivo de configuración GPD JSON")
 
     args = parser.parse_args()
 
@@ -766,11 +880,31 @@ def main():
         logger.warning(f"Named pipe no existe: {PIPE_NAME}")
         logger.warning("El pipe será creado por registro_continuo.c al iniciarse")
 
+    # Configurar motor de inferencia si se solicita
+    inference_config = None
+    if args.enable_inference:
+        config_path = args.inference_config or os.path.join(
+            project_local_root, "configuracion", "configuracion_gpd.json"
+        )
+        inference_config = read_fileJSON(config_path)
+        if inference_config:
+            # Asegurar que model_path sea absoluto
+            if not os.path.isabs(inference_config.get("model_path", "")):
+                inference_config["model_path"] = os.path.join(
+                    project_local_root, "models", "gpd_v2.tflite"
+                )
+            
+            # Configurar archivo de salida de picks
+            picks_file = os.path.join(log_directory, "gpd_detections.picks")
+            inference_config["picks_output_file"] = picks_file
+            logger.info(f"Detecciones GPD se guardarán en: {picks_file}")
+
     # Inicializar gestor
     manager = MiniSEEDBufferManager(
         config_mseed=config_mseed,
         buffer_size=args.buffer_size,
         window_duration=args.window_duration,
+        inference_config=inference_config,
         logger=logger
     )
 
