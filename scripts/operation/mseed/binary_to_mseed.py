@@ -252,16 +252,11 @@ def leer_archivo_binario(archivo_binario, logger):
     tiempo_inicio = datetime.timedelta(seconds=int(tiempos_np[0]))
     tiempo_final = datetime.timedelta(seconds=int(tiempos_np[-1]))
 
-    print(f"Primer elemento de tiempos_np: {tiempos_np[0]}")
-    print(f"Último elemento de tiempos_np: {tiempos_np[-1]}")
-    print(f"Tiempo primer elemento: {tiempo_inicio}")
-    print(f"Tiempo último elemento: {tiempo_final}")
-
-    logger.info(f"Tiempo primera muestra: {tiempo_inicio}. Tiempo última muestra: {tiempo_final}")
+    # Extraer timestamps completos de primera y última trama
+    ts_inicio, ts_final = extraer_timestamp_completo_binario(archivo_binario)
 
     end_time = timer()
-    print(f"Tiempo de ejecución de leer_archivo_binario: {end_time - start_time:.4f} segundos")
-    return datos_np, segundos_faltantes if segundos_faltantes else None
+    return datos_np, segundos_faltantes if segundos_faltantes else None, end_time - start_time, ts_inicio, ts_final
 
 
 # Extrae y convierte valores de tiempo del archivo binario y los devuelve en un diccionario.
@@ -302,6 +297,77 @@ def extraer_tiempo_binario(archivo):
         "n_segundo": n_segundo
     }
     return(tiempo_binario)
+
+
+def extraer_timestamp_completo_binario(archivo_binario):
+    """
+    Extrae las fechas completas de la primera y última trama del archivo binario.
+    
+    Returns:
+        tuple: (timestamp_inicio, timestamp_final) como objetos datetime, o (None, None) si hay error
+    """
+    try:
+        with open(archivo_binario, "rb") as f:
+            # Leer primera trama (2506 bytes)
+            primera_trama = np.fromfile(f, dtype=np.uint8, count=2506)
+            if primera_trama.size < 2506:
+                return None, None
+            
+            # Extraer timestamp de primera trama (bytes 2500-2505)
+            anio_inicio = int(primera_trama[2500]) + 2000
+            mes_inicio = int(primera_trama[2501])
+            dia_inicio = int(primera_trama[2502])
+            hora_inicio = int(primera_trama[2503])
+            minuto_inicio = int(primera_trama[2504])
+            segundo_inicio = int(primera_trama[2505])
+            
+            # Ir al final del archivo para leer última trama
+            f.seek(-2506, 2)  # Seek desde el final del archivo
+            ultima_trama = np.fromfile(f, dtype=np.uint8, count=2506)
+            if ultima_trama.size < 2506:
+                return None, None
+            
+            # Extraer timestamp de última trama
+            anio_final = int(ultima_trama[2500]) + 2000
+            mes_final = int(ultima_trama[2501])
+            dia_final = int(ultima_trama[2502])
+            hora_final = int(ultima_trama[2503])
+            minuto_final = int(ultima_trama[2504])
+            segundo_final = int(ultima_trama[2505])
+            
+            # Crear objetos datetime
+            timestamp_inicio = datetime.datetime(anio_inicio, mes_inicio, dia_inicio, 
+                                                hora_inicio, minuto_inicio, segundo_inicio)
+            timestamp_final = datetime.datetime(anio_final, mes_final, dia_final,
+                                               hora_final, minuto_final, segundo_final)
+            
+            return timestamp_inicio, timestamp_final
+    except Exception:
+        return None, None
+
+
+def extraer_timestamps_mseed(archivo_mseed):
+    """
+    Extrae los timestamps de inicio y fin de un archivo miniSEED.
+    
+    Returns:
+        tuple: (timestamp_inicio, timestamp_final) como objetos datetime, o (None, None) si hay error
+    """
+    try:
+        st = read(archivo_mseed)
+        if len(st) == 0:
+            return None, None
+        
+        # Obtener el timestamp más temprano y más tardío de todas las trazas
+        start_times = [tr.stats.starttime.datetime for tr in st]
+        end_times = [tr.stats.endtime.datetime for tr in st]
+        
+        timestamp_inicio = min(start_times)
+        timestamp_final = max(end_times)
+        
+        return timestamp_inicio, timestamp_final
+    except Exception:
+        return None, None
 
 
 # Genera el nombre del archivo Mini-SEED basado en el tipo de archivo, el código de estación y el tiempo extraído.
@@ -426,22 +492,44 @@ def procesar_archivo_individual(binary_file, path_archivo_salida, codigo_estacio
         # Extraer tiempo del archivo binario
         tiempo_binario = extraer_tiempo_binario(binary_file)
         if tiempo_binario is None:
-            mensaje = f"Tamaño de trama insuficiente o archivo dañado: {binary_filename}"
-            logger.error(mensaje)
-            return False, mensaje
+            mensaje = "Tamaño de trama insuficiente o archivo dañado"
+            logger.error(f"{binary_filename}: {mensaje}")
+            return False, mensaje, None
 
         # Generar nombre y leer datos
         nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
-        datos_archivo_binario, segundos_faltantes = leer_archivo_binario(binary_file, logger)
+        datos_archivo_binario, segundos_faltantes, tiempo_lectura, ts_bin_inicio, ts_bin_final = leer_archivo_binario(binary_file, logger)
         
         # Realizar conversión
+        ruta_mseed_completa = os.path.join(path_archivo_salida, nombre_archivo_mseed)
         conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed, logger)
         
-        return True, "Éxito"
+        # Extraer timestamps del archivo miniSEED generado
+        ts_mseed_inicio, ts_mseed_final = extraer_timestamps_mseed(ruta_mseed_completa)
+        
+        # Crear diccionario con información detallada
+        info = {
+            'binary_filename': binary_filename,
+            'mseed_filename': nombre_archivo_mseed,
+            'mseed_path': ruta_mseed_completa,
+            'tiempos_np': [int(tiempo_binario['n_segundo']), None], # El final se calcula en leer_archivo_binario si es necesario, pero aquí el usuario quiere los del array
+            'ts_bin_inicio': ts_bin_inicio,
+            'ts_bin_final': ts_bin_final,
+            'ts_mseed_inicio': ts_mseed_inicio,
+            'ts_mseed_final': ts_mseed_final,
+            'tiempo_lectura': tiempo_lectura,
+            'segundos_faltantes': segundos_faltantes
+        }
+        
+        # Actualizar tiempos_np final si lo tenemos del ts_bin_final
+        if ts_bin_final:
+            info['tiempos_np'][1] = ts_bin_final.hour * 3600 + ts_bin_final.minute * 60 + ts_bin_final.second
+
+        return True, "Éxito", info
     except Exception as e:
         mensaje = f"Error inesperado al procesar {os.path.basename(binary_file)}: {str(e)}"
         logger.error(mensaje)
-        return False, mensaje
+        return False, mensaje, None
 
 #######################################################################################################
 
@@ -694,9 +782,13 @@ def main():
 
         for idx, binary_file in enumerate(archivos_dat, 1):
             binary_filename = os.path.basename(binary_file)
-            print(f"[{idx}/{len(archivos_dat)}] Procesando: {binary_filename}")
             
-            exito, mensaje = procesar_archivo_individual(
+            # Formato compacto del índice con padding
+            idx_str = f"[{idx:02d}/{len(archivos_dat):02d}]"
+            separator = "─" * 40
+            print(f"{idx_str} ── {binary_filename} {separator}")
+            
+            exito, mensaje, info = procesar_archivo_individual(
                 binary_file, 
                 path_archivos_mseed, 
                 codigo_estacion, 
@@ -704,13 +796,32 @@ def main():
                 logger
             )
             
-            if exito:
+            if exito and info:
+                # Formatear tiempos
+                ts_bin_str = f"{info['ts_bin_inicio'].strftime('%Y-%m-%d %H:%M:%S')} ──> {info['ts_bin_final'].strftime('%Y-%m-%d %H:%M:%S')}" if info['ts_bin_inicio'] and info['ts_bin_final'] else "N/A"
+                ts_mseed_str = f"{info['ts_mseed_inicio'].strftime('%Y-%m-%d %H:%M:%S')} ──> {info['ts_mseed_final'].strftime('%Y-%m-%d %H:%M:%S')}" if info['ts_mseed_inicio'] and info['ts_mseed_final'] else "N/A"
+                
+                # Acortar path si es muy largo
+                output_path = info['mseed_path']
+                if len(output_path) > 60:
+                    output_path = "..." + output_path[-57:]
+                
+                print(f"tiempos_np : {info['tiempos_np']}")
+                print(f"binary time: {ts_bin_str}")
+                print(f"mseed time : {ts_mseed_str}")
+                print(f"output     : {output_path}")
+                print(f"status     : OK ({info['tiempo_lectura']:.2f}s)")
+                print()
                 exitosos += 1
-                print(f"  ✓ Convertido exitosamente")
             else:
+                print(f"tiempos_np : N/A")
+                print(f"binary time: ERROR")
+                print(f"mseed time : ERROR")
+                print(f"output     : N/A")
+                print(f"status     : FAILED - {mensaje}")
+                print()
                 fallidos += 1
                 archivos_fallidos.append((binary_filename, mensaje))
-                print(f"  ✗ Error: {mensaje}")
 
         print(f"\n{'='*60}")
         print(f"RESUMEN DE CONVERSIÓN")
@@ -728,8 +839,6 @@ def main():
                 logger.error(f"Archivo fallido: {nombre} - {error}")
         print(f"{'='*60}\n")
         
-        end_time_total = timer()
-        print(f"Tiempo total de ejecución: {end_time_total - start_time_total:.4f} segundos")
         return
 
     # Verificar que el archivo binario existe
@@ -739,7 +848,7 @@ def main():
         return
 
     # Procesar archivo individual para modos 1, 2 y 3
-    exito, mensaje = procesar_archivo_individual(
+    exito, mensaje, info = procesar_archivo_individual(
         binary_file, 
         path_archivo_salida, 
         codigo_estacion, 
@@ -747,7 +856,26 @@ def main():
         logger
     )
     
-    if not exito:
+    if exito and info:
+        # Formato compacto para un solo archivo
+        idx_str = "[01/01]"
+        separator = "─" * 40
+        print(f"{idx_str} ── {os.path.basename(binary_file)} {separator}")
+        
+        ts_bin_str = f"{info['ts_bin_inicio'].strftime('%Y-%m-%d %H:%M:%S')} ──> {info['ts_bin_final'].strftime('%Y-%m-%d %H:%M:%S')}" if info['ts_bin_inicio'] and info['ts_bin_final'] else "N/A"
+        ts_mseed_str = f"{info['ts_mseed_inicio'].strftime('%Y-%m-%d %H:%M:%S')} ──> {info['ts_mseed_final'].strftime('%Y-%m-%d %H:%M:%S')}" if info['ts_mseed_inicio'] and info['ts_mseed_final'] else "N/A"
+        
+        output_path = info['mseed_path']
+        if len(output_path) > 60:
+            output_path = "..." + output_path[-57:]
+        
+        print(f"tiempos_np : {info['tiempos_np']}")
+        print(f"binary time: {ts_bin_str}")
+        print(f"mseed time : {ts_mseed_str}")
+        print(f"output     : {output_path}")
+        print(f"status     : OK ({info['tiempo_lectura']:.2f}s)")
+        print()
+    else:
         print(f"Error: {mensaje}")
 
     end_time_total = timer()
