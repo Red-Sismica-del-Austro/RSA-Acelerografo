@@ -14,6 +14,10 @@ EJEMPLOS DE USO:
    python3 binary_to_mseed.py --event                                    # Evento extraído
    python3 binary_to_mseed.py --file archivo.dat                         # Conversión manual (nombre)
    python3 binary_to_mseed.py --file /ruta/completa/archivo.dat         # Conversión manual (ruta absoluta)
+   python3 binary_to_mseed.py --dir /ruta/completa/directorio          # Conversión por directorio
+
+4. Modo con directorio:
+   python3 binary_to_mseed.py --dir /ruta/completa/directorio    # Convierte todos los .dat del directorio
 
 DESCRIPCIÓN DE MODOS:
 
@@ -32,6 +36,12 @@ DESCRIPCIÓN DE MODOS:
     Si la ruta es absoluta, usa esa ruta directamente
     Si es solo el nombre, busca en: directorios.registro_continuo (del JSON)
     Guarda en: directorios.archivos_mseed (del JSON)
+
+- Modo 4 (--dir):
+    Convierte todos los archivos .dat encontrados en el directorio especificado
+    Busca en: ruta proporcionada por el usuario
+    Guarda en: directorios.archivos_mseed (del JSON)
+    Procesa archivos secuencialmente y continúa aunque alguno falle
 
 REQUISITOS:
 
@@ -53,6 +63,7 @@ from time import time as timer
 import logging
 import datetime
 import argparse
+import glob
 #######################################################################################################
 
 ##################################### ~Variables globales~ ############################################
@@ -407,6 +418,31 @@ def obtener_logger(id_estacion, log_directory, log_filename):
         loggers[id_estacion] = logger
     return loggers[id_estacion]
 
+# Procesa un archivo binario individual y lo convierte a miniSEED.
+def procesar_archivo_individual(binary_file, path_archivo_salida, codigo_estacion, config_mseed, logger):
+    try:
+        binary_filename = os.path.basename(binary_file)
+        
+        # Extraer tiempo del archivo binario
+        tiempo_binario = extraer_tiempo_binario(binary_file)
+        if tiempo_binario is None:
+            mensaje = f"Tamaño de trama insuficiente o archivo dañado: {binary_filename}"
+            logger.error(mensaje)
+            return False, mensaje
+
+        # Generar nombre y leer datos
+        nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
+        datos_archivo_binario, segundos_faltantes = leer_archivo_binario(binary_file, logger)
+        
+        # Realizar conversión
+        conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed, logger)
+        
+        return True, "Éxito"
+    except Exception as e:
+        mensaje = f"Error inesperado al procesar {os.path.basename(binary_file)}: {str(e)}"
+        logger.error(mensaje)
+        return False, mensaje
+
 #######################################################################################################
 
 ############################################ ~Main~ ###################################################
@@ -426,6 +462,8 @@ def main():
                         help="Modo evento extraído (equivalente a modo 2)")
     parser.add_argument("--file", metavar="ARCHIVO",
                         help="Modo conversión manual, especifica el archivo binario (equivalente a modo 3)")
+    parser.add_argument("--dir", metavar="DIRECTORIO",
+                        help="Modo conversión por directorio, convierte todos los archivos .dat del directorio especificado")
     args = parser.parse_args()
 
     # Obtiene la variable de entorno para definir la ruta del archivo de configuración
@@ -491,6 +529,8 @@ def main():
         tipoArchivo = "2"
     elif args.file:
         tipoArchivo = "3"
+    elif args.dir:
+        tipoArchivo = "4"
     else:
         logger.error("No se especificó un modo válido.")
         print("Error: No se especificó un modo válido.")
@@ -501,6 +541,7 @@ def main():
         print("  python3 binary_to_mseed.py --continuous    # Registro continuo")
         print("  python3 binary_to_mseed.py --event         # Evento extraído")
         print("  python3 binary_to_mseed.py --file archivo.dat  # Conversión manual")
+        print("  python3 binary_to_mseed.py --dir /ruta/directorio  # Conversión por directorio")
         return
 
     if tipoArchivo == '1':
@@ -612,25 +653,102 @@ def main():
         logger.info(f'Convirtiendo el archivo manual: {binary_filename} desde {binary_file}')
         print(f'Convirtiendo el archivo manual: {binary_filename}')
 
+    elif tipoArchivo == '4':
+        # Conversión por directorio
+        directorio_entrada = args.dir
+        if not directorio_entrada:
+            logger.error("Se debe especificar el directorio con --dir")
+            print("Error: Se debe especificar el directorio.")
+            return
+
+        if not os.path.isdir(directorio_entrada):
+            logger.error(f"El directorio no existe: {directorio_entrada}")
+            print(f"Error: El directorio no existe: {directorio_entrada}")
+            return
+
+        if not path_archivos_mseed:
+            logger.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            print("Error: No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            return
+
+        if not os.path.isdir(path_archivos_mseed):
+            logger.error(f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            print(f"Error: El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            return
+
+        archivos_dat = sorted(glob.glob(os.path.join(directorio_entrada, "*.dat")))
+
+        if not archivos_dat:
+            logger.warning(f"No se encontraron archivos .dat en: {directorio_entrada}")
+            print(f"Advertencia: No se encontraron archivos .dat en: {directorio_entrada}")
+            return
+
+        logger.info(f"Iniciando conversión por directorio: {directorio_entrada}")
+        logger.info(f"Archivos encontrados: {len(archivos_dat)}")
+        print(f"\nEncontrados {len(archivos_dat)} archivos .dat en {directorio_entrada}")
+        print(f"Directorio de salida: {path_archivos_mseed}\n")
+
+        exitosos = 0
+        fallidos = 0
+        archivos_fallidos = []
+
+        for idx, binary_file in enumerate(archivos_dat, 1):
+            binary_filename = os.path.basename(binary_file)
+            print(f"[{idx}/{len(archivos_dat)}] Procesando: {binary_filename}")
+            
+            exito, mensaje = procesar_archivo_individual(
+                binary_file, 
+                path_archivos_mseed, 
+                codigo_estacion, 
+                config_mseed, 
+                logger
+            )
+            
+            if exito:
+                exitosos += 1
+                print(f"  ✓ Convertido exitosamente")
+            else:
+                fallidos += 1
+                archivos_fallidos.append((binary_filename, mensaje))
+                print(f"  ✗ Error: {mensaje}")
+
+        print(f"\n{'='*60}")
+        print(f"RESUMEN DE CONVERSIÓN")
+        print(f"{'='*60}")
+        print(f"Total de archivos: {len(archivos_dat)}")
+        print(f"Exitosos: {exitosos}")
+        print(f"Fallidos: {fallidos}")
+
+        logger.info(f"Conversión por directorio completada. Exitosos: {exitosos}, Fallidos: {fallidos}")
+
+        if archivos_fallidos:
+            print(f"\nArchivos que fallaron:")
+            for nombre, error in archivos_fallidos:
+                print(f"  - {nombre}: {error}")
+                logger.error(f"Archivo fallido: {nombre} - {error}")
+        print(f"{'='*60}\n")
+        
+        end_time_total = timer()
+        print(f"Tiempo total de ejecución: {end_time_total - start_time_total:.4f} segundos")
+        return
+
     # Verificar que el archivo binario existe
     if not os.path.isfile(binary_file):
         logger.error(f"El archivo binario no existe: {binary_file}")
         print(f"Error: El archivo binario no existe: {binary_file}")
         return
 
-    # Extraer tiempo del archivo binario
-    tiempo_binario = extraer_tiempo_binario(binary_file)
-    if tiempo_binario is None:
-        logger.error(f'Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto: {binary_filename}')
-        print("Error al extraer el tiempo del archivo binario.")
-        return  
-
-    # Inicializa la conversion del archivo
-    nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
-    datos_archivo_binario, segundos_faltantes = leer_archivo_binario(binary_file, logger)
-    conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed, logger)
-
-    #print('Se ha creado el archivo: %s' %nombre_archivo_mseed)
+    # Procesar archivo individual para modos 1, 2 y 3
+    exito, mensaje = procesar_archivo_individual(
+        binary_file, 
+        path_archivo_salida, 
+        codigo_estacion, 
+        config_mseed, 
+        logger
+    )
+    
+    if not exito:
+        print(f"Error: {mensaje}")
 
     end_time_total = timer()
     print(f"Tiempo total de ejecución: {end_time_total - start_time_total:.4f} segundos")
