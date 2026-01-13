@@ -23,5 +23,6 @@
     "ESTACION(21)": 53,
     "FILTRO(22)": " ",
     "RES1(23)": " ",
-    "RES2(24)": " "
+    "RES2(24)": " ",
+    "USAR_FECHA_FILENAME": true
 }
