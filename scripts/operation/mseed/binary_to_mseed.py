@@ -64,6 +64,7 @@ import logging
 import datetime
 import argparse
 import glob
+import re
 #######################################################################################################
 
 ##################################### ~Variables globales~ ############################################
@@ -85,102 +86,13 @@ def read_fileJSON(nameFile):
         return None
     
 
-def leer_archivo_binario_0(archivo_binario, logger):
-    start_time = timer()
-    datos = [[], [], []]
-    tiempos = []
-
-    chunk_size = 2506 * 60  # Leer en bloques de aproximadamente 2.5 MB
-    with open(archivo_binario, "rb") as f:
-        while True:
-            chunk = np.fromfile(f, dtype=np.uint8, count=chunk_size)
-            if chunk.size == 0:
-                break
-
-            num_tramas = len(chunk) // 2506
-            if num_tramas == 0:
-                continue
-
-            chunk = chunk[:num_tramas * 2506].reshape((num_tramas, 2506))
-
-            horas = chunk[:, 2503].astype(np.uint32)
-            minutos = chunk[:, 2504].astype(np.uint32)
-            segundos = chunk[:, 2505].astype(np.uint32)
-
-
-            #n_segundos = horas * 3600 + minutos * 60 + segundos
-            #tiempos.extend(n_segundos)
-            for h, m, s in zip(horas, minutos, segundos):
-                if h > 23 or m > 59 or s > 59:
-                    logger.warning(f"Trama con tiempo inválido detectado: {h:02}:{m:02}:{s:02}")
-                    continue
-                tiempos.append(h * 3600 + m * 60 + s)
-
-            
-            # Procesar los datos de forma vectorizada
-            datos_crudos = chunk[:, :2500].reshape((-1, 250, 10))
-
-            for j in range(3):
-                dato_1 = datos_crudos[:, :, j * 3 + 1].flatten()
-                dato_2 = datos_crudos[:, :, j * 3 + 2].flatten()
-                dato_3 = datos_crudos[:, :, j * 3 + 3].flatten()
-
-                xValue = ((dato_1.astype(np.uint32) << 12) & 0xFF000) + \
-                         ((dato_2.astype(np.uint32) << 4) & 0xFF0) + \
-                         ((dato_3.astype(np.uint32) >> 4) & 0xF)
-
-                # Convertir xValue a int32 para manejar valores negativos
-                xValue = xValue.astype(np.int32)
-                mask = xValue >= 0x80000
-                xValue[mask] = -1 * ((~xValue[mask] + 1) & 0x7FFFF)
-
-                datos[j].extend(xValue)
-
-    datos_np = np.array(datos)
-
-    logger.info(f"Archivo {os.path.basename(archivo_binario)} leido con exito")
-
-    # Detectar segundos faltantes en el array tiempos
-    tiempos_np = np.array(tiempos)
-    segundos_faltantes = []
-    dif_segundos = np.diff(tiempos_np)
-
-
-    # Validación de saltos anómalos
-    saltos_grandes = dif_segundos[dif_segundos > 1]
-    if len(saltos_grandes) > 0:
-         top5 = [int(x) for x in sorted(saltos_grandes)[-5:]]
-         total_faltantes = sum(int(x - 1) for x in saltos_grandes)
-         logger.warning(f"Detectados {len(saltos_grandes)} saltos mayores a 1 segundo (total {total_faltantes} segundos faltantes). Top 5: {top5}")
-
-
-    missing_indices = np.where(dif_segundos > 1)[0]
-    for idx in missing_indices:
-        segundos_faltantes.extend(range(tiempos_np[idx] + 1, tiempos_np[idx + 1]))
-
-    tiempo_incio = datetime.timedelta(seconds=int(tiempos_np[0]))
-    tiempo_final = datetime.timedelta(seconds=int(tiempos_np[-1]))
-    
-    # Imprimir primeros y últimos elementos de tiempos_np y segundos_faltantes
-    print(f"Primer elemento de tiempos_np: {tiempos_np[0]}")
-    print(f"Último elemento de tiempos_np: {tiempos_np[-1]}")
-    print(f"Tiempo primer elemento: {tiempo_incio}")
-    print(f"Tiempo ultimo elemento: {tiempo_final}")
-
-    if segundos_faltantes:
-        logger.warning(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
-    else:
-        logger.info(f"Tiempo primera muestra: {tiempo_incio}. Tiempo ultima muestra: {tiempo_final}")
-
-    end_time = timer()
-    print(f"Tiempo de ejecución de leer_archivo_binario: {end_time - start_time:.4f} segundos")
-    return datos_np, segundos_faltantes if segundos_faltantes else None
 
 def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
     start_time = timer()
     datos = [[], [], []]
     tiempos = []
 
+    total_tramas_invalidas = 0
     chunk_size = 2506 * 60  # Leer en bloques de aproximadamente 2.5 MB
     with open(archivo_binario, "rb") as f:
         while True:
@@ -205,6 +117,7 @@ def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
             for h, m, s, valido in zip(horas, minutos, segundos, mascara_valida):
                 if not valido:
                     logger.warning(f"Trama con tiempo inválido detectado: {h:02}:{m:02}:{s:02}")
+                    total_tramas_invalidas += 1
                     continue
                 tiempos.append(h * 3600 + m * 60 + s)
 
@@ -231,10 +144,17 @@ def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
 
     logger.info(f"Archivo {os.path.basename(archivo_binario)} leído con éxito")
 
-    if tramas_invalidas > 0:
-        logger.warning(f"Se descartaron {tramas_invalidas} tramas con tiempo inválido para mantener la alineación de datos.")
+    if total_tramas_invalidas > 0:
+        logger.warning(f"Se descartaron {total_tramas_invalidas} tramas con tiempo inválido para mantener la alineación de datos.")
 
     tiempos_np = np.array(tiempos)
+
+    # Evitar IndexError si no hay tiempos válidos
+    if tiempos_np.size == 0:
+        logger.error(f"No se encontraron tramas con tiempo válido en {os.path.basename(archivo_binario)}")
+        end_time = timer()
+        return datos_np, None, end_time - start_time, None, None
+
     segundos_faltantes = []
     dif_segundos = np.diff(tiempos_np)
 
@@ -268,7 +188,7 @@ def extraer_tiempo_binario(archivo, usar_fecha_filename=False):
     
     if tramaDatos.size < 2506:
         print("Error: Tamaño de trama insuficiente. Archivo binario podría estar dañado o incompleto.")
-        return
+        return None
     
     # Extraer HORA de las tramas (siempre de las tramas binarias)
     hora = int(tramaDatos[2503])
@@ -318,17 +238,7 @@ def extraer_tiempo_binario(archivo, usar_fecha_filename=False):
 def extraer_fecha_desde_nombre_archivo(archivo_path):
     """
     Extrae la fecha (año, mes, día) del nombre del archivo binario.
-    
-    Formato esperado: CODIGO_AAMMDD-HHMMSS.dat
-    Ejemplo: DEV00_260105-174128.dat -> 2026-01-05
-    
-    Args:
-        archivo_path: Ruta completa o nombre del archivo binario
-        
-    Returns:
-        dict: Diccionario con año, mes, día y sus versiones formateadas, o None si el formato no coincide
     """
-    import re
     
     # Obtener solo el nombre del archivo sin la ruta
     nombre_archivo = os.path.basename(archivo_path)
@@ -478,7 +388,7 @@ def conversion_mseed_digital(fileName, path, tiempo_binario, datos_archivo_binar
     # Crear un objeto Stream con las trazas
     stData = Stream(traces=[trazaCH1, trazaCH2, trazaCH3])
 
-    fileNameCompleto = path + fileName
+    fileNameCompleto = os.path.join(path, fileName)
     
     stData.write(fileNameCompleto, format='MSEED', encoding='STEIM1', reclen=512)
     logger.info(f"Archivo {fileName} creado con exito")
@@ -757,8 +667,7 @@ def main():
         binary_file = os.path.join(path_registro_continuo, binary_filename)
         path_archivo_salida = path_archivos_mseed
         logger.info(f'Convirtiendo el archivo de registro continuo: {binary_filename}')
-        print(f'Convirtiendo el archivo: {binary_filename}')
-
+        
     elif tipoArchivo == '2':
         # Archivos eventos extraidos
         if not path_eventos_extraidos:
@@ -788,8 +697,7 @@ def main():
         binary_file = os.path.join(path_eventos_extraidos, binary_filename)
         path_archivo_salida = path_eventos_extraidos
         logger.info(f'Convirtiendo el archivo de evento extraído: {binary_filename}')
-        print(f'Convirtiendo el archivo: {binary_filename}')
-
+        
     elif tipoArchivo == '3':
         # Conversión manual de archivo específico
         # Determinar la ruta del archivo: puede venir como argumento posicional o con --file
