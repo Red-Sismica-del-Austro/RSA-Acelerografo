@@ -3,21 +3,37 @@
 # Cargar las variables de entorno
 source /usr/local/bin/project_paths
 
+# Función para verificar si un proceso está ejecutándose
+is_running() {
+  pgrep -f "$1" > /dev/null 2>&1
+  return $?
+}
+
 # Dependiendo de los parámetros que se le pasen al programa se usa una opción u otra
 case "$1" in
   start)
-    echo "Arrancando sistema de registro continuo..."
-    sudo -E "$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/registro_continuo" &
-    sleep 5
-    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py" 1 &
-    pid_mseed=$!
-    wait $pid_mseed
-    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py" 
+    # 1. Verificar/iniciar registro_continuo
+    if is_running "/scripts/acelerografo/ejecutables/registro_continuo"; then
+      echo "registro_continuo ya está ejecutándose"
+    else
+      echo "Iniciando registro_continuo..."
+      sudo -E "$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/registro_continuo" &
+    fi
+    
+    # 2. Ejecutar conversión binary_to_mseed (esperar a que termine)
+    echo "Ejecutando conversión a miniSEED..."
+    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py" 1
+    
+    # 3. Ejecutar gestor de archivos
+    echo "Ejecutando gestor de archivos..."
+    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py"
     ;;
   
   stop)
     echo "Deteniendo sistema de registro continuo..."
     sudo killall -q registro_continuo
+    pkill -f binary_to_mseed.py 2>/dev/null
+    pkill -f gestor_archivos_acq.py 2>/dev/null
     sudo "$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/reset_master"
     ;;
 
