@@ -18,6 +18,7 @@ case "$1" in
     else
       echo "Iniciando registro_continuo..."
       sudo -E "$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/registro_continuo" &
+      sleep 3
     fi
     
     # 2. Ejecutar conversión binary_to_mseed (esperar a que termine)
@@ -26,7 +27,7 @@ case "$1" in
     
     # 3. Ejecutar gestor de archivos
     echo "Ejecutando gestor de archivos..."
-    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py"
+    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py" &
     ;;
   
   stop)
