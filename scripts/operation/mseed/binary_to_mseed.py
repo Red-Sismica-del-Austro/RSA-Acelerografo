@@ -65,6 +65,16 @@ import datetime
 import argparse
 import glob
 import re
+
+# Insertar ruta para importar structured_logger desde el directorio superior (scripts/operation/)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from structured_logger import StructuredLogger
+
+# ===== CONFIGURACIÓN DE LOGGING =====
+VERBOSITY_LEVEL = "SUMMARY"  # Puede ser: DEBUG, INFO, SUMMARY
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+LOG_BACKUP_COUNT = 3
+# ====================================
 #######################################################################################################
 
 ##################################### ~Variables globales~ ############################################
@@ -85,7 +95,6 @@ def read_fileJSON(nameFile):
         print(f"Error al decodificar el archivo {nameFile}.")
         return None
     
-
 
 def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
     start_time = timer()
@@ -116,7 +125,7 @@ def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
 
             for h, m, s, valido in zip(horas, minutos, segundos, mascara_valida):
                 if not valido:
-                    logger.warning(f"Trama con tiempo inválido detectado: {h:02}:{m:02}:{s:02}")
+                    logger.data_warning(os.path.basename(archivo_binario), "trama_invalida", f"{h:02}:{m:02}:{s:02}")
                     total_tramas_invalidas += 1
                     continue
                 tiempos.append(h * 3600 + m * 60 + s)
@@ -142,16 +151,14 @@ def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
 
     datos_np = np.array(datos)
 
-    logger.info(f"Archivo {os.path.basename(archivo_binario)} leído con éxito")
-
     if total_tramas_invalidas > 0:
-        logger.warning(f"Se descartaron {total_tramas_invalidas} tramas con tiempo inválido para mantener la alineación de datos.")
+        logger.data_warning(os.path.basename(archivo_binario), "tramas_descartadas", total_tramas_invalidas)
 
     tiempos_np = np.array(tiempos)
 
     # Evitar IndexError si no hay tiempos válidos
     if tiempos_np.size == 0:
-        logger.error(f"No se encontraron tramas con tiempo válido en {os.path.basename(archivo_binario)}")
+        logger.convert_fail(os.path.basename(archivo_binario), "sin_tramas_validas")
         end_time = timer()
         return datos_np, None, end_time - start_time, None, None
 
@@ -163,7 +170,7 @@ def leer_archivo_binario(archivo_binario, logger, usar_fecha_filename=False):
     if len(saltos_grandes) > 0:
         top5 = [int(x) for x in sorted(saltos_grandes)[-5:]]
         total_faltantes = sum(int(x - 1) for x in saltos_grandes)
-        logger.warning(f" Segundos faltantes: {total_faltantes}. Saltos mayores a 1 segundo: {len(saltos_grandes)}. Top 5: {top5}")
+        logger.data_warning(os.path.basename(archivo_binario), "segundos_faltantes", f"count={total_faltantes}, saltos={len(saltos_grandes)}, top5={top5}")
 
     missing_indices = np.where(dif_segundos > 1)[0]
     for idx in missing_indices:
@@ -391,7 +398,6 @@ def conversion_mseed_digital(fileName, path, tiempo_binario, datos_archivo_binar
     fileNameCompleto = os.path.join(path, fileName)
     
     stData.write(fileNameCompleto, format='MSEED', encoding='STEIM1', reclen=512)
-    logger.info(f"Archivo {fileName} creado con exito")
 
 
 # Crea una traza de datos con los parámetros especificados y ajusta los datos para incluir ceros en los segundos faltantes si es necesario.
@@ -457,25 +463,16 @@ def obtenerTraza(nombreCanal, num_canal, data, tiempo_binario, segundos_faltante
     return traza
 
 
-# Función para inicializar y obtener el logger de un cliente
-def obtener_logger(id_estacion, log_directory, log_filename):
-    global loggers
-    if id_estacion not in loggers:
-        # Crear un logger para el cliente
-        logger = logging.getLogger(id_estacion)
-        logger.setLevel(logging.DEBUG)
-        # Ruta completa del archivo de log
-        log_path = os.path.join(log_directory, log_filename)
-        # Crear manejador de archivo, apuntando al archivo existente
-        file_handler = logging.FileHandler(log_path)
-        file_handler.setLevel(logging.DEBUG)
-        # Crear formato de logging y añadirlo al manejador
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        # Añadir el manejador al logger
-        logger.addHandler(file_handler)
-        loggers[id_estacion] = logger
-    return loggers[id_estacion]
+# Función para inicializar y obtener el logger estructurado
+def obtener_logger_estructurado(id_estacion, log_directory, log_filename, verbosity="SUMMARY"):
+    return StructuredLogger(
+        id_estacion=id_estacion,
+        log_directory=log_directory,
+        log_filename=log_filename,
+        verbosity=verbosity,
+        max_bytes=LOG_MAX_BYTES,
+        backup_count=LOG_BACKUP_COUNT
+    )
 
 # Procesa un archivo binario individual y lo convierte a miniSEED.
 def procesar_archivo_individual(binary_file, path_archivo_salida, codigo_estacion, config_mseed, logger, usar_fecha_filename=False):
@@ -486,16 +483,20 @@ def procesar_archivo_individual(binary_file, path_archivo_salida, codigo_estacio
         tiempo_binario = extraer_tiempo_binario(binary_file, usar_fecha_filename)
         if tiempo_binario is None:
             mensaje = "Tamaño de trama insuficiente o archivo dañado"
-            logger.error(f"{binary_filename}: {mensaje}")
+            logger.convert_fail(binary_filename, mensaje)
             return False, mensaje, None
 
         # Generar nombre y leer datos
         nombre_archivo_mseed = nombrar_archivo_mseed(codigo_estacion, tiempo_binario)
         datos_archivo_binario, segundos_faltantes, tiempo_lectura, ts_bin_inicio, ts_bin_final = leer_archivo_binario(binary_file, logger, usar_fecha_filename)
         
+        logger.read_ok(binary_filename, tiempo_lectura)
+
         # Realizar conversión
         ruta_mseed_completa = os.path.join(path_archivo_salida, nombre_archivo_mseed)
         conversion_mseed_digital(nombre_archivo_mseed, path_archivo_salida, tiempo_binario, datos_archivo_binario, segundos_faltantes, config_mseed, logger)
+        
+        logger.convert_ok(binary_filename, nombre_archivo_mseed, tiempo_lectura)
         
         # Extraer timestamps del archivo miniSEED generado
         ts_mseed_inicio, ts_mseed_final = extraer_timestamps_mseed(ruta_mseed_completa)
@@ -521,7 +522,7 @@ def procesar_archivo_individual(binary_file, path_archivo_salida, codigo_estacio
         return True, "Éxito", info
     except Exception as e:
         mensaje = f"Error inesperado al procesar {os.path.basename(binary_file)}: {str(e)}"
-        logger.error(mensaje)
+        logger.convert_fail(os.path.basename(binary_file), str(e))
         return False, mensaje, None
 
 #######################################################################################################
@@ -601,10 +602,10 @@ def main():
             print(f"Error al crear el directorio de logs {log_directory}: {e}")
             return
 
-    # Inicializa el logger
-    logger = obtener_logger(dispositivo_id, log_directory, "mseed.log")
+    # Inicializa el logger estructurado
+    logger = obtener_logger_estructurado(dispositivo_id, log_directory, "mseed.log", verbosity=VERBOSITY_LEVEL)
     
-    logger.info(f"Método de extracción de fecha: {'Nombre de archivo' if usar_fecha_filename else 'Tramas binarias'}")
+    logger.init(f"Método extracción fecha: {'Nombre archivo' if usar_fecha_filename else 'Tramas binarias'}")
 
     # Determinar tipo de archivo y ruta
     if args.modo_simple in ("1", "2", "3"):
@@ -618,7 +619,7 @@ def main():
     elif args.dir:
         tipoArchivo = "4"
     else:
-        logger.error("No se especificó un modo válido.")
+        logger.config_error("main", "No se especificó un modo válido.")
         print("Error: No se especificó un modo válido.")
         print("Uso:")
         print("  python3 binary_to_mseed.py 1               # Registro continuo")
@@ -633,21 +634,21 @@ def main():
     if tipoArchivo == '1':
         # Archivos registro continuo
         if not path_registro_continuo:
-            logger.error("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+            logger.config_error("config_dispositivo", "No se encontró la ruta 'registro_continuo'")
             print("Error: No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
             return
         if not path_archivos_mseed:
-            logger.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            logger.config_error("config_dispositivo", "No se encontró la ruta 'archivos_mseed'")
             print("Error: No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
             return
 
         # Verificar que los directorios existen
         if not os.path.isdir(path_registro_continuo):
-            logger.error(f"El directorio de registro continuo no existe: {path_registro_continuo}")
+            logger.config_error("dirs", f"El directorio de registro continuo no existe: {path_registro_continuo}")
             print(f"Error: El directorio de registro continuo no existe: {path_registro_continuo}")
             return
         if not os.path.isdir(path_archivos_mseed):
-            logger.error(f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            logger.config_error("dirs", f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
             print(f"Error: El directorio de archivos mseed no existe: {path_archivos_mseed}")
             return
 
@@ -655,29 +656,29 @@ def main():
             with open(archivoNombresArchivosRC) as ficheroNombresArchivos:
                 lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
                 if len(lineasFicheroNombresArchivos) < 2:
-                    logger.error("El archivo de nombres de registro continuo no tiene suficientes líneas.")
+                    logger.convert_fail("RC_list", "insufficient_lines")
                     print("Error: El archivo de nombres de registro continuo no tiene suficientes líneas.")
                     return
                 binary_filename = lineasFicheroNombresArchivos[1].rstrip('\n')
         except FileNotFoundError:
-            logger.error(f"No se encontró el archivo: {archivoNombresArchivosRC}")
+            logger.convert_fail("RC_list", "file_not_found")
             print(f"Error: No se encontró el archivo: {archivoNombresArchivosRC}")
             return
 
         binary_file = os.path.join(path_registro_continuo, binary_filename)
         path_archivo_salida = path_archivos_mseed
-        logger.info(f'Convirtiendo el archivo de registro continuo: {binary_filename}')
+        logger.convert_start("RC", binary_filename)
         
     elif tipoArchivo == '2':
         # Archivos eventos extraidos
         if not path_eventos_extraidos:
-            logger.error("No se encontró la ruta 'eventos_extraidos' en configuracion_dispositivo.json")
+            logger.config_error("config_dispositivo", "No se encontró la ruta 'eventos_extraidos'")
             print("Error: No se encontró la ruta 'eventos_extraidos' en configuracion_dispositivo.json")
             return
 
         # Verificar que el directorio existe
         if not os.path.isdir(path_eventos_extraidos):
-            logger.error(f"El directorio de eventos extraídos no existe: {path_eventos_extraidos}")
+            logger.config_error("dirs", f"El directorio de eventos extraídos no existe: {path_eventos_extraidos}")
             print(f"Error: El directorio de eventos extraídos no existe: {path_eventos_extraidos}")
             return
 
@@ -685,18 +686,18 @@ def main():
             with open(archivoNombresArchivosEE) as ficheroNombresArchivos:
                 lineasFicheroNombresArchivos = ficheroNombresArchivos.readlines()
                 if len(lineasFicheroNombresArchivos) < 1:
-                    logger.error("El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
+                    logger.convert_fail("EE_list", "insufficient_lines")
                     print("Error: El archivo de nombres de eventos extraidos no tiene suficientes líneas.")
                     return
                 binary_filename = lineasFicheroNombresArchivos[0].rstrip('\n')
         except FileNotFoundError:
-            logger.error(f"No se encontró el archivo: {archivoNombresArchivosEE}")
+            logger.convert_fail("EE_list", "file_not_found")
             print(f"Error: No se encontró el archivo: {archivoNombresArchivosEE}")
             return
 
         binary_file = os.path.join(path_eventos_extraidos, binary_filename)
         path_archivo_salida = path_eventos_extraidos
-        logger.info(f'Convirtiendo el archivo de evento extraído: {binary_filename}')
+        logger.convert_start("EE", binary_filename)
         
     elif tipoArchivo == '3':
         # Conversión manual de archivo específico
@@ -704,7 +705,7 @@ def main():
         archivo_input = args.archivo_nombre or args.file
 
         if not archivo_input:
-            logger.error("Se debe especificar el archivo binario como segundo argumento o con --file")
+            logger.config_error("main", "missing_file_arg")
             print("Error: Se debe especificar el archivo binario.")
             print("Uso: python3 binary_to_mseed.py 3 <archivo.dat>")
             print("  o: python3 binary_to_mseed.py --file <archivo.dat>")
@@ -716,57 +717,57 @@ def main():
             binary_filename = os.path.basename(archivo_input)
         else:
             if not path_registro_continuo:
-                logger.error("No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
+                logger.config_error("config_dispositivo", "No se encontró la ruta 'registro_continuo'")
                 print("Error: No se encontró la ruta 'registro_continuo' en configuracion_dispositivo.json")
                 return
             binary_filename = archivo_input
             binary_file = os.path.join(path_registro_continuo, binary_filename)
 
         if not path_archivos_mseed:
-            logger.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            logger.config_error("config_dispositivo", "No se encontró la ruta 'archivos_mseed'")
             print("Error: No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
             return
 
         # Verificar que el directorio de salida existe
         if not os.path.isdir(path_archivos_mseed):
-            logger.error(f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            logger.config_error("dirs", f"mseed_dir_not_exists: {path_archivos_mseed}")
             print(f"Error: El directorio de archivos mseed no existe: {path_archivos_mseed}")
             return
 
         path_archivo_salida = path_archivos_mseed
-        logger.info(f'Convirtiendo el archivo manual: {binary_filename} desde {binary_file}')
+        logger.convert_start("Manual", binary_filename)
         
     elif tipoArchivo == '4':
         # Conversión por directorio
         directorio_entrada = args.dir
         if not directorio_entrada:
-            logger.error("Se debe especificar el directorio con --dir")
+            logger.config_error("main", "missing_dir_arg")
             print("Error: Se debe especificar el directorio.")
             return
 
         if not os.path.isdir(directorio_entrada):
-            logger.error(f"El directorio no existe: {directorio_entrada}")
+            logger.config_error("dirs", f"input_dir_not_exists: {directorio_entrada}")
             print(f"Error: El directorio no existe: {directorio_entrada}")
             return
 
         if not path_archivos_mseed:
-            logger.error("No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
+            logger.config_error("config_dispositivo", "No se encontró la ruta 'archivos_mseed'")
             print("Error: No se encontró la ruta 'archivos_mseed' en configuracion_dispositivo.json")
             return
 
         if not os.path.isdir(path_archivos_mseed):
-            logger.error(f"El directorio de archivos mseed no existe: {path_archivos_mseed}")
+            logger.config_error("dirs", f"mseed_dir_not_exists: {path_archivos_mseed}")
             print(f"Error: El directorio de archivos mseed no existe: {path_archivos_mseed}")
             return
 
         archivos_dat = sorted(glob.glob(os.path.join(directorio_entrada, "*.dat")))
 
         if not archivos_dat:
-            logger.warning(f"No se encontraron archivos .dat en: {directorio_entrada}")
+            logger.convert_fail("dir_scan", f"no_dat_files_found: {directorio_entrada}")
             print(f"Advertencia: No se encontraron archivos .dat en: {directorio_entrada}")
             return
 
-        logger.info(f"Iniciando conversión por directorio: {directorio_entrada}")
+        logger.convert_start("Directorio", directorio_entrada)
         logger.info(f"Archivos encontrados: {len(archivos_dat)}")
         print(f"\nEncontrados {len(archivos_dat)} archivos .dat en {directorio_entrada}")
         print(f"Directorio de salida: {path_archivos_mseed}\n")
@@ -826,20 +827,20 @@ def main():
         print(f"Exitosos: {exitosos}")
         print(f"Fallidos: {fallidos}")
 
-        logger.info(f"Conversión por directorio completada. Exitosos: {exitosos}, Fallidos: {fallidos}")
+        logger.summary(tipo="directorio", exitosos=exitosos, fallidos=fallidos)
 
         if archivos_fallidos:
             print(f"\nArchivos que fallaron:")
             for nombre, error in archivos_fallidos:
                 print(f"  - {nombre}: {error}")
-                logger.error(f"Archivo fallido: {nombre} - {error}")
+                logger.convert_fail(nombre, error)
         print(f"{'='*60}\n")
         
         return
 
     # Verificar que el archivo binario existe
     if not os.path.isfile(binary_file):
-        logger.error(f"El archivo binario no existe: {binary_file}")
+        logger.convert_fail(binary_file, "file_not_found")
         print(f"Error: El archivo binario no existe: {binary_file}")
         return
 
@@ -875,17 +876,8 @@ def main():
     else:
         print(f"Error: {mensaje}")
 
-    end_time_total = timer()
+    logger.summary(ejecucion="completada", modo=tipoArchivo)
 
-    # Sube los archivos convertidos a Drive
-    '''
-    if tipoArchivo=='1':
-        subprocess.run(["python3", script_subir_archivo_drive, nombre_archivo_mseed, "3", "1"])
-        time.sleep(5)
-        subprocess.run(["python3", script_subir_archivo_drive, binary_filename, "1", "0"])
-    elif tipoArchivo=='2':
-        subprocess.run(["python3", script_subir_archivo_drive, nombre_archivo_mseed, "2", "1"])
-    '''
 #######################################################################################################
 if __name__ == '__main__':
     main()

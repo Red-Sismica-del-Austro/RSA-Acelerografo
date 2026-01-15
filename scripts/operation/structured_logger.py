@@ -37,55 +37,90 @@ class StructuredLogger:
         msg_lvl = levels.get(msg_level, 1)
         return msg_lvl >= config_level
 
-    def _format_msg(self, tag, type_file, name_file, details=None):
+    def _log_structured(self, level, tag, name, details=None):
+        """Método interno para loguear con formato estándar [TAG] type | name | details"""
+        if not self._should_log(level):
+            return
+        
+        msg = f"[{tag}]"
+        if name:
+            msg += f" {name}"
+        
         if details:
-            return f"{tag} {type_file} | {name_file} | {details}"
-        return f"{tag} {type_file} | {name_file}"
+            if isinstance(details, dict):
+                details_str = " | ".join([f"{k}={v}" for k, v in details.items()])
+            else:
+                details_str = str(details)
+            msg += f" | {details_str}"
+            
+        if level == "DEBUG":
+            self.logger.debug(msg)
+        elif level == "INFO":
+            self.logger.info(msg)
+        elif level == "WARNING":
+            self.logger.warning(msg)
+        elif level == "ERROR":
+            self.logger.error(msg)
+        else: # DEFAULT SUMMARY -> INFO
+            self.logger.info(msg)
 
     def init(self, details):
-        if self._should_log("SUMMARY"):
-            self.logger.info(f"[INIT] {details}")
+        self._log_structured("SUMMARY", "INIT", None, details)
 
     def upload_ok(self, type_file, name_file, **kwargs):
-        if self._should_log("INFO"):
-            details = " | ".join([f"{k}={v}" for k, v in kwargs.items()])
-            self.logger.info(self._format_msg("[UPLOAD_OK]", type_file, name_file, details))
+        self._log_structured("INFO", "UPLOAD_OK", f"{type_file} | {name_file}", kwargs)
 
     def upload_fail(self, type_file, name_file, error):
-        if self._should_log("SUMMARY"):
-            self.logger.error(self._format_msg("[UPLOAD_FAIL]", type_file, name_file, f"error={error}"))
+        self._log_structured("SUMMARY", "UPLOAD_FAIL", f"{type_file} | {name_file}", {"error": error})
 
     def delete_age(self, type_file, name_file, age):
-        if self._should_log("INFO"):
-            self.logger.info(self._format_msg("[DELETE_AGE]", type_file, name_file, f"age={age}d"))
+        self._log_structured("INFO", "DELETE_AGE", f"{type_file} | {name_file}", {"age": f"{age}d"})
 
     def delete_space(self, type_file, name_file, free):
-        if self._should_log("SUMMARY"):
-            self.logger.warning(self._format_msg("[DELETE_SPACE]", type_file, name_file, f"free={free}%"))
+        self._log_structured("SUMMARY", "DELETE_SPACE", f"{type_file} | {name_file}", {"reason": free})
 
     def protected(self, type_file, name_file, reason):
-        if self._should_log("INFO"):
-            self.logger.info(self._format_msg("[PROTECTED]", type_file, name_file, f"reason={reason}"))
+        self._log_structured("INFO", "PROTECTED", f"{type_file} | {name_file}", {"reason": reason})
 
     def skip(self, type_file, name_file, reason):
-        if self._should_log("DEBUG"):
-            self.logger.debug(self._format_msg("[SKIP]", type_file, name_file, f"reason={reason}"))
+        self._log_structured("DEBUG", "SKIP", f"{type_file} | {name_file}", {"reason": reason})
 
     def summary(self, **kwargs):
-        if self._should_log("SUMMARY"):
-            details = " | ".join([f"{k}={v}" for k, v in kwargs.items()])
-            self.logger.info(f"[SUMMARY] {details}")
+        self._log_structured("SUMMARY", "SUMMARY", None, kwargs)
 
     def error(self, operation, error):
-        if self._should_log("SUMMARY"):
-            self.logger.error(f"[ERROR] operation={operation} | error={error}")
+        self._log_structured("SUMMARY", "ERROR", None, {"operation": operation, "error": error})
 
     def info(self, msg):
-        """Mensaje genérico de información"""
         if self._should_log("INFO"):
             self.logger.info(msg)
 
     def warning(self, msg):
-        """Mensaje genérico de advertencia"""
         if self._should_log("SUMMARY"):
             self.logger.warning(msg)
+
+    # --- Métodos específicos para conversión (mseed) ---
+
+    def convert_start(self, modo, nombre):
+        """[CONVERT_START] Inicio de conversión de archivo"""
+        self._log_structured("INFO", "CONVERT_START", nombre, {"modo": modo})
+
+    def convert_ok(self, nombre_bin, nombre_mseed, tiempo):
+        """[CONVERT_OK] Conversión exitosa"""
+        self._log_structured("SUMMARY", "CONVERT_OK", nombre_bin, {"mseed": nombre_mseed, "tiempo": f"{tiempo:.2f}s"})
+
+    def convert_fail(self, nombre, error):
+        """[CONVERT_FAIL] Conversión fallida"""
+        self._log_structured("SUMMARY", "CONVERT_FAIL", nombre, {"error": error})
+
+    def read_ok(self, nombre, tiempo=None):
+        """[READ_OK] Archivo binario leído"""
+        self._log_structured("DEBUG", "READ_OK", nombre, {"status": "ok", "tiempo": f"{tiempo:.2f}s" if tiempo else "N/A"})
+
+    def data_warning(self, nombre, tipo_warning, detalles):
+        """[DATA_WARNING] Problemas en datos: tramas inválidas, segundos faltantes"""
+        self._log_structured("INFO", "DATA_WARNING", nombre, {"tipo": tipo_warning, "info": detalles})
+
+    def config_error(self, componente, mensaje):
+        """[CONFIG_ERROR] Errores de configuración"""
+        self._log_structured("SUMMARY", "CONFIG_ERROR", componente, {"msg": mensaje})
