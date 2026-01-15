@@ -46,6 +46,7 @@ cp $PROJECT_GIT_ROOT/configuration/configuracion_mqtt.json $PROJECT_LOCAL_ROOT/c
 cp $PROJECT_GIT_ROOT/configuration/configuracion_mseed.json $PROJECT_LOCAL_ROOT/configuracion/
 
 # Copiar los scripts de Python del proyecto en Git al proyecto local
+cp $PROJECT_GIT_ROOT/scripts/operation/structured_logger.py $PROJECT_LOCAL_ROOT/scripts/structured_logger.py
 cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente.py $PROJECT_LOCAL_ROOT/scripts/mqtt/cliente.py
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/extract_segment.py $PROJECT_LOCAL_ROOT/scripts/mseed/extract_segment.py

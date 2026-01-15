@@ -52,11 +52,15 @@ from subir_archivo import (
 # Importar el gestor de estado de subidas
 from drive_status_manager import esta_protegido, ya_fue_subido
 
-# Configurar logging básico para mensajes tempranos
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configurar acceso a librería de logging estructurado
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from structured_logger import StructuredLogger
 
-# Variable global para guardar los loggers por id_estacion
-loggers = {}
+# ===== CONFIGURACIÓN DE LOGGING =====
+VERBOSITY_LEVEL = "SUMMARY"  # DEBUG, INFO, SUMMARY
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB
+LOG_BACKUP_COUNT = 3
+# ====================================
 
 ######################################### ~Funciones~ #################################################
 
@@ -102,42 +106,30 @@ def delete_oldest_file(directory, extension, logger, dry_run=False):
     oldest_file = min(files, key=os.path.getmtime)
     filename = os.path.basename(oldest_file)
 
+    tipo = "mseed" if extension == ".mseed" else "continuous"
+
     if dry_run:
-        logger.info(f"[DRY-RUN] Se borraría el archivo más antiguo: {filename}")
         return
 
     try:
         os.remove(oldest_file)
-        logger.info(f"Se borró el archivo más antiguo: {filename}")
+        logger.delete_space(tipo, filename, "oldest_deleted")
     except Exception as e:
-        logger.error(f"Error al borrar el archivo {filename}: {e}")
+        logger.error(f"delete_oldest_{tipo}", str(e))
 
-# Función para inicializar y obtener el logger de un cliente
-def obtener_logger(id_estacion, log_directory, log_filename):
-    global loggers
-    if id_estacion not in loggers:
-        # Crear un logger para el cliente
-        logger = logging.getLogger(id_estacion)
-        logger.setLevel(logging.DEBUG)
-        # Verificar si el directorio de logs existe, si no, crearlo
-        if not os.path.isdir(log_directory):
-            try:
-                os.makedirs(log_directory)
-                print(f"Directorio de logs creado: {log_directory}")
-            except Exception as e:
-                print(f"Error al crear el directorio de logs {log_directory}: {e}")
-        # Ruta completa del archivo de log
-        log_path = os.path.join(log_directory, log_filename)
-        # Crear manejador de archivo, apuntando al archivo de log
-        file_handler = logging.FileHandler(log_path)
-        file_handler.setLevel(logging.DEBUG)
-        # Crear formato de logging y añadirlo al manejador
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        # Añadir el manejador al logger
-        logger.addHandler(file_handler)
-        loggers[id_estacion] = logger
-    return loggers[id_estacion]
+# Función para inicializar y obtener el logger estructurado
+def obtener_logger_estructurado(id_estacion, log_directory, log_filename, verbosity="SUMMARY", dry_run=False):
+    if dry_run:
+        log_filename = log_filename.replace(".log", "_dry-run.log")
+        
+    return StructuredLogger(
+        id_estacion=id_estacion,
+        log_directory=log_directory,
+        log_filename=log_filename,
+        verbosity=verbosity,
+        max_bytes=LOG_MAX_BYTES,
+        backup_count=LOG_BACKUP_COUNT
+    )
 
 # ========== FUNCIONES AUXILIARES PARA GESTIÓN DE ARCHIVOS ==========
 
@@ -198,34 +190,23 @@ def esta_protegido_por_fallo(nombre_archivo, tipo_archivo, log_directory):
 def eliminar_archivo_con_verificacion(ruta_archivo, tipo_archivo, log_directory, logger, dry_run=False):
     """
     Elimina un archivo verificando primero si está protegido.
-
-    Args:
-        ruta_archivo: Ruta completa del archivo
-        tipo_archivo: Tipo de archivo ("continuous", "mseed", etc.)
-        log_directory: Directorio de logs
-        logger: Logger para registro
-        dry_run: Si True, solo simula la eliminación
-
-    Returns:
-        bool: True si se eliminó (o simularía eliminar), False si está protegido
     """
     nombre_archivo = os.path.basename(ruta_archivo)
 
     # Verificar si está protegido
     if esta_protegido_por_fallo(nombre_archivo, tipo_archivo, log_directory):
-        logger.info(f"Archivo protegido (fallo subida) | {tipo_archivo} | {nombre_archivo}")
+        logger.protected(tipo_archivo, nombre_archivo, "upload_failed")
         return False
 
     if dry_run:
-        logger.info(f"[DRY-RUN] Se borraría | {tipo_archivo} | {nombre_archivo}")
+        # Simular log de skip/delete en dry run si es necesario
         return True
 
     try:
         os.remove(ruta_archivo)
-        logger.info(f"Archivo eliminado | {tipo_archivo} | {nombre_archivo}")
         return True
     except Exception as e:
-        logger.error(f"Error al eliminar | {tipo_archivo} | {nombre_archivo} | {str(e)}")
+        logger.error(f"delete_{tipo_archivo}", str(e))
         return False
 
 #######################################################################################################
@@ -275,17 +256,19 @@ def main():
     # Detectar modo dry-run
     dry_run = "--dry-run" in sys.argv
 
-    # Inicializa el logger (usa archivo separado si está en dry-run)
+    # Inicializa el logger estructurado
+    logger = obtener_logger_estructurado(
+        id_estacion, 
+        log_directory, 
+        "gestor_acq.log", 
+        verbosity=VERBOSITY_LEVEL, 
+        dry_run=dry_run
+    )
+
     if dry_run:
-        logger = obtener_logger(id_estacion, log_directory, "gestor_acq_dry-run.log")
-        logger.warning("="*70)
-        logger.warning("MODO DRY-RUN ACTIVADO")
-        logger.warning("="*70)
-        logger.warning("Las operaciones se simularán sin realizar cambios reales.")
-        logger.warning("No se subirán archivos ni se borrarán datos.")
-        logger.warning("="*70)
-    else:
-        logger = obtener_logger(id_estacion, log_directory, "gestor_acq.log")
+        logger.warning("MODO DRY-RUN ACTIVADO - Las operaciones se simularán sin realizar cambios reales.")
+
+    logger.init(f"modo={mode_acq} | id_estacion={id_estacion}")
 
     # ========== VALIDAR MODO DE OPERACIÓN ==========
     # Validar modo
@@ -319,15 +302,20 @@ def main():
                 "retener_dias": {"continuous": 7}
             }
 
-    logger.info(f"Configuración cargada | modo: {mode_acq} | umbral_minimo: {umbral_minimo}% | umbral_critico: {umbral_critico}%")
+    logger.summary(
+        config_cargada=True, 
+        modo=mode_acq, 
+        umbral_min=umbral_minimo, 
+        umbral_crit=umbral_critico
+    )
 
     # Escanear el contenido de los directorios
     try:
         archivos_mseed = [f for f in os.listdir(mseed_directory) if f.endswith(".mseed")]
         archivos_binarios = [f for f in os.listdir(binary_directory) if f.endswith(".dat")]
-        logger.info(f"Se encontraron {len(archivos_mseed)} archivos mseed y {len(archivos_binarios)} archivos binarios.")
+        logger.info(f"Archivos encontrados: {len(archivos_mseed)} mseed, {len(archivos_binarios)} continuous")
     except Exception as e:
-        logger.error(f"Error al listar archivos en los directorios: {e}")
+        logger.error("list_files", str(e))
         return
     
     if mode_acq == "offline":
@@ -340,7 +328,7 @@ def main():
         archivo_mas_reciente_continuous = obtener_archivo_mas_reciente(binary_directory, ".dat")
 
         if archivo_mas_reciente_continuous:
-            logger.info(f"Archivo más reciente protegido | continuous | {os.path.basename(archivo_mas_reciente_continuous)}")
+            logger.protected("continuous", os.path.basename(archivo_mas_reciente_continuous), "active_file")
 
         # Listar archivos continuous
         archivos_continuous_paths = [os.path.join(binary_directory, f) for f in archivos_binarios]
@@ -356,14 +344,12 @@ def main():
             if antiguedad > retener_dias_continuous:
                 nombre_archivo = os.path.basename(ruta_archivo)
 
-                if dry_run:
-                    logger.info(f"[DRY-RUN] Se borraría por antigüedad | continuous | {nombre_archivo} | {antiguedad} días")
-                else:
+                if not dry_run:
                     try:
                         os.remove(ruta_archivo)
-                        logger.info(f"Eliminado por antigüedad | continuous | {nombre_archivo} | {antiguedad} días")
+                        logger.delete_age("continuous", nombre_archivo, antiguedad)
                     except Exception as e:
-                        logger.error(f"Error al eliminar | continuous | {nombre_archivo} | {str(e)}")
+                        logger.error("delete_age_continuous", str(e))
 
         # ========== POLÍTICA DE CONTROL DE ESPACIO ==========
         free_space = get_free_space_percentage(mseed_directory)
@@ -381,13 +367,13 @@ def main():
                 nombre_archivo = os.path.basename(ruta_archivo)
 
                 if dry_run:
-                    logger.info(f"[DRY-RUN] Se borraría por espacio | continuous | {nombre_archivo}")
+                    continue
                 else:
                     try:
                         os.remove(ruta_archivo)
-                        logger.info(f"Eliminado por espacio | continuous | {nombre_archivo}")
+                        logger.delete_space("continuous", nombre_archivo, "min_threshold")
                     except Exception as e:
-                        logger.error(f"Error al eliminar | continuous | {nombre_archivo} | {str(e)}")
+                        logger.error("delete_space_continuous", str(e))
 
             # Verificar espacio nuevamente
             free_space = get_free_space_percentage(mseed_directory)
@@ -411,7 +397,6 @@ def main():
         tiene_conexion = check_internet_connection(logger)
 
         if tiene_conexion:
-            logger.info("Conexión a internet | online | disponible")
 
             # ========== POLÍTICA DE SUBIDA A DRIVE ==========
             tipos_a_subir = politica_modo.get("subir", [])
@@ -428,7 +413,7 @@ def main():
                     # Verificar si ya fue subido
                     if ya_fue_subido(log_directory, nombre_archivo, "mseed"):
                         archivos_ya_subidos_count += 1
-                        logger.info(f"Archivo ya subido previamente | mseed | {nombre_archivo}")
+                        logger.skip("mseed", nombre_archivo, "already_uploaded")
                     else:
                         archivos_para_subir.append((path, "mseed"))
 
@@ -445,13 +430,13 @@ def main():
                     # Verificar si ya fue subido
                     if ya_fue_subido(log_directory, nombre_archivo, "continuous"):
                         archivos_ya_subidos_count += 1
-                        logger.info(f"Archivo ya subido previamente | continuous | {nombre_archivo}")
+                        logger.skip("continuous", nombre_archivo, "already_uploaded")
                     else:
                         archivos_para_subir.append((path, "continuous"))
 
-            # Registrar resumen de archivos ya subidos
+            # Registrar resumen de archivos ya subidos (solo si hay alguno)
             if archivos_ya_subidos_count > 0:
-                logger.info(f"Archivos omitidos (ya subidos) | online | {archivos_ya_subidos_count} archivos")
+                logger.summary(archivos_omitidos=archivos_ya_subidos_count, razon="ya_subidos")
 
             # Subir archivos si hay alguno configurado
             if archivos_para_subir:
@@ -470,7 +455,6 @@ def main():
                     token_file = os.path.join(project_local_root, "configuracion", "drive_token.json")
 
                     # Autenticar una sola vez
-                    logger.info("Autenticando en Google Drive | online")
                     service = Try_Autenticar_Drive(SCOPES, credentials_file, token_file, logger)
 
                     if service:
@@ -509,15 +493,12 @@ def main():
                             if exito:
                                 archivos_subidos += 1
 
-                        logger.info(f"Resumen subida | online | {archivos_subidos}/{len(archivos_para_subir)} archivos subidos")
+                        logger.summary(upload_resumen=f"{archivos_subidos}/{len(archivos_para_subir)}", status="success")
                     else:
-                        logger.error("Autenticación fallida | online | verificar credenciales")
+                        logger.error("auth_drive", "Autenticación fallida")
             else:
                 # No hay archivos para subir
-                if archivos_ya_subidos_count > 0:
-                    logger.info(f"Sin archivos pendientes | online | todos ya fueron subidos previamente")
-                else:
-                    logger.info(f"Sin archivos para subir | online | no hay archivos configurados para subida")
+                logger.info("Sin archivos pendientes para subida.")
 
             # ========== POLÍTICA DE RETENCIÓN TEMPORAL ==========
             retener_dias = politica_modo.get("retener_dias", {})
@@ -544,8 +525,8 @@ def main():
                         eliminado = eliminar_archivo_con_verificacion(
                             ruta_archivo, "continuous", log_directory, logger, dry_run
                         )
-                        if eliminado:
-                            logger.info(f"Eliminado por antigüedad | continuous | {os.path.basename(ruta_archivo)} | {antiguedad} días")
+                        if eliminado and not dry_run:
+                            logger.delete_age("continuous", os.path.basename(ruta_archivo), antiguedad)
 
             # Eliminar mseed antiguos (solo los que NO están protegidos por fallo de subida)
             if "mseed" in retener_dias:
@@ -559,8 +540,8 @@ def main():
                         eliminado = eliminar_archivo_con_verificacion(
                             ruta_archivo, "mseed", log_directory, logger, dry_run
                         )
-                        if eliminado:
-                            logger.info(f"Eliminado por antigüedad | mseed | {os.path.basename(ruta_archivo)} | {antiguedad} días")
+                        if eliminado and not dry_run:
+                            logger.delete_age("mseed", os.path.basename(ruta_archivo), antiguedad)
 
             # ========== POLÍTICA DE CONTROL DE ESPACIO ==========
             free_space = get_free_space_percentage(mseed_directory)
@@ -581,8 +562,8 @@ def main():
                     eliminado = eliminar_archivo_con_verificacion(
                         ruta_archivo, "continuous", log_directory, logger, dry_run
                     )
-                    if eliminado:
-                        logger.info(f"Eliminado por espacio | continuous | {os.path.basename(ruta_archivo)}")
+                    if eliminado and not dry_run:
+                        logger.delete_space("continuous", os.path.basename(ruta_archivo), "min_threshold")
 
                 # Verificar espacio nuevamente
                 free_space = get_free_space_percentage(mseed_directory)
@@ -598,8 +579,8 @@ def main():
                         eliminado = eliminar_archivo_con_verificacion(
                             ruta_archivo, "mseed", log_directory, logger, dry_run
                         )
-                        if eliminado:
-                            logger.info(f"Eliminado por espacio | mseed | {os.path.basename(ruta_archivo)}")
+                        if eliminado and not dry_run:
+                            logger.delete_space("mseed", os.path.basename(ruta_archivo), "min_threshold")
                             break  # Eliminar solo uno a la vez
 
             # Umbral crítico
@@ -615,8 +596,8 @@ def main():
                     eliminado = eliminar_archivo_con_verificacion(
                         ruta_archivo, "continuous", log_directory, logger, dry_run
                     )
-                    if eliminado:
-                        logger.info(f"Eliminado por espacio crítico | continuous | {os.path.basename(ruta_archivo)}")
+                    if eliminado and not dry_run:
+                        logger.delete_space("continuous", os.path.basename(ruta_archivo), "critical_threshold")
 
                 # Verificar espacio nuevamente
                 free_space = get_free_space_percentage(mseed_directory)
@@ -630,8 +611,8 @@ def main():
                         eliminado = eliminar_archivo_con_verificacion(
                             ruta_archivo, "mseed", log_directory, logger, dry_run
                         )
-                        if eliminado:
-                            logger.info(f"Eliminado por espacio crítico | mseed | {os.path.basename(ruta_archivo)}")
+                        if eliminado and not dry_run:
+                            logger.delete_space("mseed", os.path.basename(ruta_archivo), "critical_threshold")
                             # Verificar si ya se alcanzó el umbral
                             free_space = get_free_space_percentage(mseed_directory)
                             if free_space >= umbral_critico:
@@ -667,13 +648,14 @@ def main():
                     if dry_run:
                         logger.info(f"[DRY-RUN] Se borraría por espacio | continuous | {nombre_archivo}")
                         break
-                    else:
+                    if not dry_run:
                         try:
                             os.remove(ruta_archivo)
-                            logger.info(f"Eliminado por espacio | continuous | {nombre_archivo}")
+                            logger.delete_space("continuous", nombre_archivo, "no_connection_min_threshold")
                             break
                         except Exception as e:
-                            logger.error(f"Error al eliminar | continuous | {nombre_archivo} | {str(e)}")
+                            logger.error("delete_space_continuous_no_conn", str(e))
+                            break
 
                 # Verificar espacio nuevamente
                 free_space = get_free_space_percentage(mseed_directory)
@@ -689,7 +671,10 @@ def main():
                 delete_oldest_file(mseed_directory, ".mseed", logger, dry_run)
 
     else:
-        logger.error(f"Modo de adquisición desconocido: {mode_acq}")
+        logger.error("main", f"Modo de adquisición desconocido: {mode_acq}")
+
+    # Resumen final de ejecución
+    logger.summary(ejecucion="completada", modo=mode_acq)
  
 
 if __name__ == "__main__":
