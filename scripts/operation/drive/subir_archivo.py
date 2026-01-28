@@ -8,6 +8,7 @@ python3 subir_archivo.py --mseed archivo.mseed          # Sube archivo miniSEED 
 python3 subir_archivo.py --event evento.dat             # Sube archivo de evento extraído
 python3 subir_archivo.py --tmp temporal.tmp             # Sube archivo temporal
 python3 subir_archivo.py --log sistema.log              # Sube archivo de log
+python3 subir_archivo.py --mseed archivo.mseed --noauth_local_webserver # Autenticación en remoto
 
 PARÁMETROS OPCIONALES:
 
@@ -219,7 +220,10 @@ def get_authenticated(SCOPES, credential_file, token_file, service_name = 'drive
     creds = store.get()
     if not creds or creds.invalid:
         flow = client.flow_from_clientsecrets(credential_file, SCOPES)
-        creds = tools.run_flow(flow, store)
+        # Se utiliza parse_known_args para permitir que el script acepte banderas de autenticación
+        # (como --noauth_local_webserver) sin interferir con otros argumentos locales.
+        flags, _ = tools.argparser.parse_known_args()
+        creds = tools.run_flow(flow, store, flags)
     service = build(service_name, api_version, http = creds.authorize(Http()))
 
     return service
@@ -344,25 +348,31 @@ def main():
         }
     }
 
+    # Buscar el modo y el nombre del archivo en los argumentos (más flexible que posiciones fijas)
+    modo_arg = None
+    nombre_archivo = None
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith('--') and arg[2:] in MODOS:
+            modo_arg = arg
+            if i + 1 < len(sys.argv) and not sys.argv[i+1].startswith('--'):
+                nombre_archivo = sys.argv[i+1]
+            break
+
     # Validar argumentos
-    if len(sys.argv) < 3:
-        print("Uso: subir_archivo.py --<modo> <nombre_archivo> [--delete] [--test]")
+    if not modo_arg or not nombre_archivo:
+        print("Uso: subir_archivo.py --<modo> <nombre_archivo> [--delete] [--test] [--noauth_local_webserver]")
         print("\nModos disponibles:")
         for modo, info in MODOS.items():
             print(f"  --{modo:<12} {info['descripcion']}")
         print("\nParámetros opcionales:")
         print("  --delete      Borra el archivo local después de subirlo exitosamente")
         print("  --test        Activa modo de prueba (simula fallos de red con 90% de probabilidad)")
+        print("  --noauth_local_webserver  Usa autenticación manual (copiar/pegar código) para sesiones remotas")
         print("\nEjemplos:")
         print("  python3 subir_archivo.py --continuous archivo.dat")
         print("  python3 subir_archivo.py --mseed archivo.mseed --delete")
-        print("  python3 subir_archivo.py --event evento.dat --test")
-        print("  python3 subir_archivo.py --tmp temporal.tmp --delete --test")
-        print("  python3 subir_archivo.py --log sistema.log --delete")
+        print("  python3 subir_archivo.py --mseed archivo.mseed --noauth_local_webserver")
         return
-
-    modo_arg = sys.argv[1]
-    nombre_archivo = sys.argv[2]
 
     # Verificar parámetros opcionales
     borrar_despues = "--delete" in sys.argv

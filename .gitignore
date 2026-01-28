@@ -1,3 +1,20 @@
 # Documentation context (local only, not for production)
 # docs/context/
 
+# Google Drive Credentials
+configuration/drive_credentials.json
+configuration/drive_token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Logs
+log-files/
+*.log
+
+# System
+.DS_Store

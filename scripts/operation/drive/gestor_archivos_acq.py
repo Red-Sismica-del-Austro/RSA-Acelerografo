@@ -12,6 +12,7 @@ MODOS DE OPERACIÓN:
 USO:
     python3 gestor_archivos_acq.py              # Ejecución normal
     python3 gestor_archivos_acq.py --dry-run    # Simulación sin cambios reales
+    python3 gestor_archivos_acq.py --noauth_local_webserver # Para equipos remotos (SSH)
 
 MODO DRY-RUN:
 El parámetro --dry-run permite simular todas las operaciones sin realizar cambios:
