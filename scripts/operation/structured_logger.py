@@ -88,8 +88,20 @@ class StructuredLogger:
     def summary(self, **kwargs):
         self._log_structured("SUMMARY", "SUMMARY", None, kwargs)
 
-    def error(self, operation, error):
-        self._log_structured("SUMMARY", "ERROR", None, {"operation": operation, "error": error})
+    def error(self, operation, error=None):
+        """
+        Registra un error. Compatible con ambas firmas:
+        - error(mensaje)           # Estilo logging estándar
+        - error(operation, error)  # Estilo estructurado
+        """
+        if error is None:
+            # Llamada con un solo argumento (estilo estándar)
+            # Usar 'operation' como mensaje de error
+            details = {"error": operation}
+            self._log_structured("SUMMARY", "ERROR", None, details)
+        else:
+            # Llamada con dos argumentos (estilo estructurado)
+            self._log_structured("SUMMARY", "ERROR", None, {"operation": operation, "error": error})
 
     def info(self, msg):
         if self._should_log("INFO"):

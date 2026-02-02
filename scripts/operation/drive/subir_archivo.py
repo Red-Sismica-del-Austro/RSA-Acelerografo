@@ -224,7 +224,10 @@ def get_authenticated(SCOPES, credential_file, token_file, service_name = 'drive
         # (como --noauth_local_webserver) sin interferir con otros argumentos locales.
         flags, _ = tools.argparser.parse_known_args()
         creds = tools.run_flow(flow, store, flags)
-    service = build(service_name, api_version, http = creds.authorize(Http()))
+    
+    # Configurar timeout para redes lentas/inestables
+    http = Http(timeout=300)  # 5 minutos
+    service = build(service_name, api_version, http = creds.authorize(http))
 
     return service
 
