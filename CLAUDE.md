@@ -9,19 +9,15 @@ This is a **seismograph data acquisition system** designed for continuous seismi
 ### System Architecture
 
 ```
-ADXL355 Sensor (250Hz) → dsPIC33EP Firmware → SPI → Raspberry Pi
-                                                        ↓
-                                              registro_continuo.c
-                                                        ↓
-                                              .dat binary files
-                                                        ↓
-                                              binary_to_mseed.py
-                                                        ↓
-                                              .mseed files (STEIM1)
-                                                        ↓
-                                              gestor_archivos_acq.py
-                                                        ↓
-                                              Google Drive (online mode)
+graph TD
+    A[ADXL355 Sensor 250Hz] --> B[dsPIC33EP Firmware]
+    B -- SPI --> C[Raspberry Pi]
+    C --> D[registro_continuo.c]
+    D --> E[.dat binary files]
+    E --> F[binary_to_mseed.py]
+    F --> G[.mseed files STEIM1]
+    G --> H[gestor_archivos_acq.py]
+    H --> I[Google Drive online mode]
 ```
 
 ### Key Capabilities
@@ -60,16 +56,28 @@ The project uses two key environment variables defined in `/etc/profile.d/projec
 
 **Important**: Paths in `configuracion_dispositivo.json` must match these environment variables.
 
-## Initial Setup Commands
+## Development Workflow (Remote via SSHFS)
+
+Since development is typically done from a PC via `sshfs`, changes in `PROJECT_GIT_ROOT` are not immediately live on the Raspberry Pi's operational system.
+
+1. **Edit**: Modify files in the Git repository folder from your local machine.
+2. **Apply Changes**: You MUST run `menu.sh` on the Raspberry Pi.
+   - Use **Option 3 (Actualizar)** to sync code changes (Python, C binaries, or config templates).
+   - Use **Option 2 (Desplegar)** ONLY for initial setup or clean installs (Warning: overwrites local configurations).
+3. **Verify**: Check logs in `$PROJECT_LOCAL_ROOT/log-files/` to ensure everything is running correctly.
+
+**Important**: Never modify files directly in `$PROJECT_LOCAL_ROOT` as they will be overwritten during the next update.
+
+## Initial Setup and Update Commands
 
 ```bash
-# For a new station:
+# For a new station setup:
 bash menu.sh
-# Then select: 0 (environment vars) → 1 (install libs) → 2 (deploy)
+# Then select: 0 (environment vars) -> 1 (install libs) -> 2 (deploy)
 
-# To update existing installation:
+# To update an existing installation after pulling changes:
 git pull
-bash menu.sh  # Select option 3
+bash menu.sh  # Select option 3 (Actualizar)
 ```
 
 ## Configuration Files
@@ -191,23 +199,4 @@ Each logger is identified by station ID from `configuracion_dispositivo.json`.
 - Sampling rate typically 250 Hz, 3 channels (X, Y, Z)
 - Mini-SEED uses STEIM1 compression, record length 512 bytes
 
-## Recent Updates
 
-### Security and Deployment Improvements (Nov 2025)
-- `deploy.sh` now includes strict error handling (`set -euo pipefail`)
-- Environment variable validation added to prevent partial installations
-- Fixed critical permissions issue: log files now have correct ownership after deployment
-- Removed wildcards in Python script copying for better precision
-- `extract_segment.py` added to deployment process
-
-### File Management Enhancements (Nov 2025)
-- `gestor_archivos_acq.py` now supports configurable parameters via JSON
-- Enhanced logging with detailed space usage information
-- Memory leak fix: proper socket closure in connectivity checks
-- Better error handling with stdout/stderr capture in subprocesses
-
-### New Tool: extract_segment.py (Nov 2025)
-- Added CLI tool for extracting temporal segments from Mini-SEED archives
-- Uses UTC-only time format for consistency (no local time conversions)
-- Automatically searches files by date and time range
-- Supports PROJECT_LOCAL_ROOT environment variable for portability
