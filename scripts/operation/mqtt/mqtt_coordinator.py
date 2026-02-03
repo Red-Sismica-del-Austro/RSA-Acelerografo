@@ -17,8 +17,7 @@ from structured_logger import StructuredLogger
 # CONFIGURACIÓN Y CONSTANTES
 # ═══════════════════════════════════════════════════════════════════════════
 
-HEALTH_INTERVAL = 10    # segundos
-HEARTBEAT_INTERVAL = 60 # segundos
+HEALTH_INTERVAL = 300    # segundos
 START_TIME = time.time()
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -135,36 +134,74 @@ def publicar_state(client, config: dict, estado: str, logger: StructuredLogger):
     result = client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
     logger.mqtt_publish(topic, "ok" if result.rc == 0 else "fail")
 
+def obtener_metricas_hardware() -> dict:
+    """Obtiene métricas de hardware de Raspberry Pi."""
+    metricas = {}
+    
+    # 1. Porcentaje de disco disponible
+    try:
+        statvfs = os.statvfs('/')
+        total = statvfs.f_blocks * statvfs.f_frsize
+        free = statvfs.f_bavail * statvfs.f_frsize
+        metricas["disk_percent"] = round((free / total) * 100, 1)
+    except:
+        metricas["disk_percent"] = -1
+    
+    # 2. RAM disponible (MB)
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    metricas["ram_available_mb"] = int(line.split()[1]) // 1024
+                    break
+    except:
+        metricas["ram_available_mb"] = -1
+    
+    # 3. Load average 15 minutos
+    try:
+        metricas["load_avg_15m"] = round(os.getloadavg()[2], 2)
+    except:
+        metricas["load_avg_15m"] = -1
+    
+    # 4. Temperatura CPU (Raspberry Pi)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['vcgencmd', 'measure_temp'],
+            capture_output=True, text=True, timeout=5
+        )
+        # Formato: temp=52.3'C
+        temp_str = result.stdout.strip().split('=')[1].split("'")[0]
+        metricas["cpu_temp_c"] = float(temp_str)
+    except:
+        metricas["cpu_temp_c"] = -1
+    
+    # 5. Estado de throttling (Raspberry Pi)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['vcgencmd', 'get_throttled'],
+            capture_output=True, text=True, timeout=5
+        )
+        # Formato: throttled=0x0
+        throttled_hex = result.stdout.strip().split('=')[1]
+        metricas["throttled"] = throttled_hex
+    except:
+        metricas["throttled"] = "unknown"
+    
+    return metricas
+
 def publicar_health(client, config: dict, logger: StructuredLogger):
     """Publica métricas de hardware cada HEALTH_INTERVAL segundos."""
     topic = resolver_topico(config, "telemetry_health")
     
-    # Obtener métricas reales del sistema
-    try:
-        statvfs = os.statvfs('/')
-        disk_free_gb = round((statvfs.f_frsize * statvfs.f_bavail) / (1024**3), 2)
-    except:
-        disk_free_gb = -1  # Error al obtener
+    metricas = obtener_metricas_hardware()
+    metricas["timestamp"] = timestamp_iso()
+    metricas["uptime_s"] = int(time.time() - START_TIME)
     
-    payload = {
-        "timestamp": timestamp_iso(),
-        "disk_free_gb": disk_free_gb,
-        "uptime_s": int(time.time() - START_TIME)
-    }
     qos = config["qos"]["telemetry"]
     retain = config["retain"]["telemetry_health"]
-    client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
-
-def publicar_heartbeat(client, config: dict, logger: StructuredLogger):
-    """Publica heartbeat cada HEARTBEAT_INTERVAL segundos."""
-    topic = resolver_topico(config, "telemetry_heartbeat")
-    payload = {
-        "last_event": "none",  # TODO: Actualizar al detectar evento
-        "timestamp": timestamp_iso()
-    }
-    qos = config["qos"]["telemetry"]
-    retain = config["retain"]["telemetry_heartbeat"]
-    client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
+    client.publish(topic, json.dumps(metricas), qos=qos, retain=retain)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CALLBACKS MQTT
@@ -305,7 +342,6 @@ def main():
     
     # Loop principal con timers de telemetría
     last_health = 0
-    last_heartbeat = 0
     
     try:
         while True:
@@ -314,10 +350,6 @@ def main():
             if now - last_health >= HEALTH_INTERVAL:
                 publicar_health(client, config, logger)
                 last_health = now
-            
-            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                publicar_heartbeat(client, config, logger)
-                last_heartbeat = now
             
             time.sleep(1)
             

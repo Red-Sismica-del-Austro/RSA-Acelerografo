@@ -6,7 +6,7 @@
     "topics": {
         "telemetry_state": "{org}/{app}/{cap}/{id}/telemetry/state",
         "telemetry_health": "{org}/{app}/{cap}/{id}/telemetry/health",
-        "telemetry_heartbeat": "{org}/{app}/{cap}/{id}/telemetry/heartbeat",
+        "events_heartbeat": "{org}/{app}/{cap}/{id}/events/heartbeat",
         "events_local": "{org}/{app}/{cap}/{id}/events/detected",
         "events_regional": "{org}/{app}/{cap}/+/events/detected",
         "cmd_execute": "{org}/{app}/{cap}/{id}/cmd/+",
@@ -27,7 +27,6 @@
     "retain": {
         "telemetry_state": true,
         "telemetry_health": false,
-        "telemetry_heartbeat": true,
         "events_local": false,
         "cmd_response": false
     }
