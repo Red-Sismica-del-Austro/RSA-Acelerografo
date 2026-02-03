@@ -92,6 +92,12 @@ update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mqtt/" "$PROJECT_LO
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mseed/" "$PROJECT_LOCAL_ROOT/scripts/mseed/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/drive/" "$PROJECT_LOCAL_ROOT/scripts/drive/"
 
+# Actualizar StructuredLogger (ubicado en la base de operation)
+if [ -f "$PROJECT_GIT_ROOT/scripts/operation/structured_logger.py" ]; then
+    cp "$PROJECT_GIT_ROOT/scripts/operation/structured_logger.py" "$PROJECT_LOCAL_ROOT/scripts/structured_logger.py"
+    echo "Actualizando: $PROJECT_LOCAL_ROOT/scripts/structured_logger.py"
+fi
+
 # Revisar y actualizar task-scripts en /usr/local/bin
 update_task_scripts "$PROJECT_GIT_ROOT/scripts/task/"
 

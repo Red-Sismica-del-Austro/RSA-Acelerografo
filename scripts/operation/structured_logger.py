@@ -136,3 +136,25 @@ class StructuredLogger:
     def config_error(self, componente, mensaje):
         """[CONFIG_ERROR] Errores de configuración"""
         self._log_structured("SUMMARY", "CONFIG_ERROR", componente, {"msg": mensaje})
+
+    # --- Métodos específicos para MQTT ---
+
+    def mqtt_connect(self, broker: str, status: str):
+        """[MQTT_CONNECT] Conexión/reconexión al broker"""
+        self._log_structured("SUMMARY", "MQTT_CONNECT", broker, {"status": status})
+
+    def mqtt_disconnect(self, reason: str):
+        """[MQTT_DISCONNECT] Desconexión del broker"""
+        self._log_structured("SUMMARY", "MQTT_DISCONNECT", None, {"reason": reason})
+
+    def mqtt_publish(self, topic: str, status: str = "ok"):
+        """[MQTT_PUBLISH] Mensaje publicado"""
+        self._log_structured("DEBUG", "MQTT_PUBLISH", topic, {"status": status})
+
+    def mqtt_subscribe(self, topic: str, qos: int):
+        """[MQTT_SUBSCRIBE] Suscripción a tópico"""
+        self._log_structured("INFO", "MQTT_SUBSCRIBE", topic, {"qos": qos})
+
+    def mqtt_error(self, operation: str, error: str):
+        """[MQTT_ERROR] Error en operación MQTT"""
+        self._log_structured("SUMMARY", "MQTT_ERROR", operation, {"error": error})

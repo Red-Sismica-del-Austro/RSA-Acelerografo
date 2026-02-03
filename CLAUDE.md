@@ -54,7 +54,16 @@ The project uses two key environment variables defined in `/etc/profile.d/projec
 - `PROJECT_GIT_ROOT`: Path to the Git repository (e.g., `/home/rsa/git/RSA-Acelerografo`)
 - `PROJECT_LOCAL_ROOT`: Path to the deployed project (e.g., `/home/rsa/projects/acelerografo`)
 
-**Important**: Paths in `configuracion_dispositivo.json` must match these environment variables.
+**Important**: Paths in `configuracion_dispositivo.json` must match these environment variables. Operational Python scripts must use `PROJECT_LOCAL_ROOT` to resolve absolute paths for configuration and logs.
+
+### Coding Standards
+- **Path Resolution**: Use `os.getenv("PROJECT_LOCAL_ROOT")` to define base paths.
+  ```python
+  project_root = os.getenv("PROJECT_LOCAL_ROOT")
+  config_path = os.path.join(project_root, "configuracion", "file.json")
+  ```
+- **Logging**: Use `StructuredLogger` for all operational scripts to ensure consistent audit trails.
+- **MQTT**: New scripts should follow the hierarchical topic structure and use `.env` for credentials.
 
 ## Development Workflow (Remote via SSHFS)
 
