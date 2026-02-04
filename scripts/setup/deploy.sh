@@ -57,13 +57,14 @@ cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo.py $PROJECT_LOCAL_ROO
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt 
 
-# Copiar los archivos de configuracion de Supervisor al directorio de configuracion (esto sí requiere sudo)
-sudo cp $PROJECT_GIT_ROOT/scripts/task/mqttcliente.conf /etc/supervisor/conf.d/
+# Copiar los archivos de configuracion de Supervisor al directorio de configuracion (procesando placeholders)
+sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" $PROJECT_GIT_ROOT/scripts/task/mqtt_coordinator.conf > $PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf
+sudo cp $PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf /etc/supervisor/conf.d/
 
 # Actualizar Supervisor
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl start mqttcliente
+sudo supervisorctl start mqtt_coordinator
 
 # Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do

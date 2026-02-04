@@ -111,4 +111,27 @@ else
     echo "No se detectaron cambios en los acelerografo-scripts o sus librerias."
 fi
 
+# Función para actualizar configuración de Supervisor
+function update_supervisor_config {
+    local src_file="$PROJECT_GIT_ROOT/scripts/task/mqtt_coordinator.conf"
+    local temp_file="$PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf.tmp"
+    local dest_file="/etc/supervisor/conf.d/mqtt_coordinator.conf"
+
+    # Procesar placeholders en un archivo temporal
+    sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" "$src_file" > "$temp_file"
+
+    # Comparar con el actual en /etc/supervisor/conf.d/
+    if [ ! -f "$dest_file" ] || ! cmp -s "$temp_file" "$dest_file"; then
+        echo "Actualizando configuración de Supervisor: $dest_file"
+        sudo cp "$temp_file" "$dest_file"
+        sudo supervisorctl reread
+        sudo supervisorctl update
+    else
+        echo "No se detectaron cambios en la configuración de Supervisor."
+    fi
+}
+
+# Llamar a la función
+update_supervisor_config
+
 echo "Actualización completada con éxito."
