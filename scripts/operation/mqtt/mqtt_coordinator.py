@@ -138,24 +138,33 @@ def obtener_metricas_hardware() -> dict:
     """Obtiene métricas de hardware de Raspberry Pi."""
     metricas = {}
     
-    # 1. Porcentaje de disco disponible
+    # 1. Porcentaje de disco en uso
     try:
         statvfs = os.statvfs('/')
         total = statvfs.f_blocks * statvfs.f_frsize
         free = statvfs.f_bavail * statvfs.f_frsize
-        metricas["disk_percent"] = round((free / total) * 100, 1)
+        metricas["disk_percent"] = round(((total - free) / total) * 100, 1)
     except:
         metricas["disk_percent"] = -1
     
-    # 2. RAM disponible (MB)
+    # 2. Porcentaje de RAM en uso
     try:
         with open('/proc/meminfo', 'r') as f:
+            mem_total = None
+            mem_available = None
             for line in f:
-                if line.startswith('MemAvailable:'):
-                    metricas["ram_available_mb"] = int(line.split()[1]) // 1024
+                if line.startswith('MemTotal:'):
+                    mem_total = int(line.split()[1])
+                elif line.startswith('MemAvailable:'):
+                    mem_available = int(line.split()[1])
+                if mem_total and mem_available:
                     break
+        if mem_total and mem_available:
+            metricas["ram_percent"] = round(((mem_total - mem_available) / mem_total) * 100, 1)
+        else:
+            metricas["ram_percent"] = -1
     except:
-        metricas["ram_available_mb"] = -1
+        metricas["ram_percent"] = -1
     
     # 3. Load average 15 minutos
     try:
