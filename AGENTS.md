@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI agents when working with code in this repository.
 
 ## Project Overview
 
@@ -34,7 +34,7 @@ graph TD
 - **Data format**: Binary .dat (proprietary) → Mini-SEED (standard)
 - **Compression**: STEIM1 for efficient storage
 - **Time synchronization**: GPS + DS3234 RTC on dsPIC
-- **Event detection**: STA=125 samples (0.5s), LTA=12500 samples (50s), trigger=4.0, detrigger=2.0
+
 
 ## Detailed Documentation
 
@@ -55,6 +55,16 @@ The project uses two key environment variables defined in `/etc/profile.d/projec
 - `PROJECT_LOCAL_ROOT`: Path to the deployed project (e.g., `/home/rsa/projects/acelerografo`)
 
 **Important**: Paths in `configuracion_dispositivo.json` must match these environment variables. Operational Python scripts must use `PROJECT_LOCAL_ROOT` to resolve absolute paths for configuration and logs.
+
+### Python Virtual Environment
+
+All Python dependencies are managed through a virtual environment located at `$PROJECT_LOCAL_ROOT/.venv/`. The venv is created with `--system-site-packages` to inherit precompiled apt packages (numpy, scipy, matplotlib), while lighter packages (obspy, paho-mqtt, google-api, etc.) are installed via pip inside the venv from `requirements.txt`.
+
+- **Python interpreter**: `$PROJECT_LOCAL_ROOT/.venv/bin/python3`
+- **Dependencies file**: `$PROJECT_GIT_ROOT/requirements.txt`
+- **Setup script**: `scripts/setup/crear_entorno_virtual.sh`
+
+**Important**: Never install Python packages globally with `sudo pip3 install`. All pip packages must go through the virtual environment.
 
 ### Coding Standards
 - **Path Resolution**: Use `os.getenv("PROJECT_LOCAL_ROOT")` to define base paths.
@@ -82,11 +92,14 @@ Since development is typically done from a PC via `sshfs`, changes in `PROJECT_G
 ```bash
 # For a new station setup:
 bash menu.sh
-# Then select: 0 (environment vars) -> 1 (install libs) -> 2 (deploy)
+# Then select: 0 (environment vars) -> 1 (install libs + create venv) -> 2 (deploy)
 
 # To update an existing installation after pulling changes:
 git pull
-bash menu.sh  # Select option 3 (Actualizar)
+bash menu.sh  # Select option 3 (Actualizar) - also updates venv if requirements.txt changed
+
+# To clean global pip packages before migrating to venv:
+bash menu.sh  # Select option 4 (Desinstalar librerías globales)
 ```
 
 ## Configuration Files
@@ -159,12 +172,12 @@ Executables are placed in `$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/
 
 ### Manual file conversion
 ```bash
-python3 scripts/operation/mseed/binary_to_mseed.py --modo archivo --nombre <filename.dat>
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/binary_to_mseed.py --modo archivo --nombre <filename.dat>
 ```
 
 ### Extract temporal segments from Mini-SEED files
 ```bash
-python3 scripts/operation/mseed/extract_segment.py --start "2024-01-15Z14:30:45.250" --duration 60
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/extract_segment.py --start "2024-01-15Z14:30:45.250" --duration 60
 # Extracts 60 seconds starting from the specified UTC time
 # Note: Time format must use UTC (Z) format: YYYY-MM-DDZHH:MM:SS.fff
 ```
@@ -176,7 +189,7 @@ python3 scripts/operation/mseed/extract_segment.py --start "2024-01-15Z14:30:45.
 
 ### Upload files to Drive
 ```bash
-python3 scripts/operation/drive/subir_archivo.py <filename> <type> <delete_after>
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py <filename> <type> <delete_after>
 # type: 1=binary, 2=event_mseed, 3=continuous_mseed
 # delete_after: 0=keep, 1=delete
 ```
@@ -185,14 +198,15 @@ python3 scripts/operation/drive/subir_archivo.py <filename> <type> <delete_after
 
 - `configuration/`: JSON config files
 - `main-libraries/`: bcm2835 and wiringPi for Raspberry Pi GPIO/SPI
+- `requirements.txt`: Python pip dependencies for the virtual environment
 - `scripts/`:
   - `env/`: Environment variable definitions
-  - `setup/`: `deploy.sh`, `update.sh`, `makefile`
+  - `setup/`: `deploy.sh`, `update.sh`, `makefile`, `crear_entorno_virtual.sh`, `desinstalar_librerias.sh`, `instalar_librerias.sh`
   - `operation/`: Core operational scripts (acelerografo C code, Python converters)
   - `task/`: Cron-scheduled task scripts
   - `dev-tests/`: Development/testing scripts
 - `docs/`: README and CHANGELOG
-- `menu.sh`: Interactive setup menu
+- `menu.sh`: Interactive setup menu (options 0-5)
 
 ## Logging
 
