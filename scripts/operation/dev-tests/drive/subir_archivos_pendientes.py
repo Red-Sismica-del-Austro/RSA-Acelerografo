@@ -25,7 +25,7 @@ def main():
         for nombre_archivo_mseed in archivos_mseed:
             #ruta_archivo_mseed = os.path.join(mseed_directory, nombre_archivo_mseed)
             print(f"Subiendo el archivo: {nombre_archivo_mseed}")
-            subprocess.run(["python3", script_subir_archivo_drive, nombre_archivo_mseed, "3", "1"])
+            subprocess.run(["python3", script_subir_archivo_drive, "--mseed", nombre_archivo_mseed, "--delete"])
     else:
         print("No se encontraron archivos .mseed en el directorio especificado.")
 

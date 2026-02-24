@@ -1,0 +1,11 @@
+#ifndef TIEMPO_GPS_H
+#define TIEMPO_GPS_H
+
+///////////////////////////////////////////   Definicion de pines   ///////////////////////////////////////////
+
+/////////////////////////////////////////// Definicion de funciones ///////////////////////////////////////////
+void GPS_init();
+unsigned long RecuperarFechaGPS(unsigned char *tramaDatosGPS);
+unsigned long RecuperarHoraGPS(unsigned char *tramaDatosGPS);
+
+#endif

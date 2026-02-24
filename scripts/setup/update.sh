@@ -92,6 +92,12 @@ update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mqtt/" "$PROJECT_LO
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mseed/" "$PROJECT_LOCAL_ROOT/scripts/mseed/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/drive/" "$PROJECT_LOCAL_ROOT/scripts/drive/"
 
+# Actualizar StructuredLogger (ubicado en la base de operation)
+if [ -f "$PROJECT_GIT_ROOT/scripts/operation/structured_logger.py" ]; then
+    cp "$PROJECT_GIT_ROOT/scripts/operation/structured_logger.py" "$PROJECT_LOCAL_ROOT/scripts/structured_logger.py"
+    echo "Actualizando: $PROJECT_LOCAL_ROOT/scripts/structured_logger.py"
+fi
+
 # Revisar y actualizar task-scripts en /usr/local/bin
 update_task_scripts "$PROJECT_GIT_ROOT/scripts/task/"
 
@@ -104,5 +110,28 @@ if [ "$(find $PROJECT_GIT_ROOT/scripts/operation/acelerografo/ -type f -newer $P
 else
     echo "No se detectaron cambios en los acelerografo-scripts o sus librerias."
 fi
+
+# Función para actualizar configuración de Supervisor
+function update_supervisor_config {
+    local src_file="$PROJECT_GIT_ROOT/scripts/task/mqtt_coordinator.conf"
+    local temp_file="$PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf.tmp"
+    local dest_file="/etc/supervisor/conf.d/mqtt_coordinator.conf"
+
+    # Procesar placeholders en un archivo temporal
+    sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" "$src_file" > "$temp_file"
+
+    # Comparar con el actual en /etc/supervisor/conf.d/
+    if [ ! -f "$dest_file" ] || ! cmp -s "$temp_file" "$dest_file"; then
+        echo "Actualizando configuración de Supervisor: $dest_file"
+        sudo cp "$temp_file" "$dest_file"
+        sudo supervisorctl reread
+        sudo supervisorctl update
+    else
+        echo "No se detectaron cambios en la configuración de Supervisor."
+    fi
+}
+
+# Llamar a la función
+update_supervisor_config
 
 echo "Actualización completada con éxito."

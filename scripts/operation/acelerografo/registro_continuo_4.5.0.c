@@ -19,9 +19,8 @@
 
 #define PIPE_NAME "/tmp/my_pipe"
 
-// Incluye las librerias de deteccion de eventos y de lectura del archivo json
+// Incluye la libreria de lectura del archivo json
 #include "lector_json.h"
-#include "detector_eventos.h"
 
 // Declaracion de constantes
 #define P2 2
@@ -35,15 +34,10 @@
 #define FreqSPI 2000000
 
 
-
 // Declaracion de variables
 unsigned short i;
 unsigned int x;
 unsigned short buffer;
-unsigned short banFile;
-unsigned short banNewFile;
-unsigned short numBytes;
-unsigned short contMuestras;
 unsigned char tiempoPIC[8];
 unsigned char tiempoLocal[8];
 unsigned char tramaDatos[NUM_ELEMENTOS];
@@ -52,64 +46,47 @@ unsigned char tramaDatos[NUM_ELEMENTOS];
 char filenameTemporalRegistroContinuo[100];
 
 char comando[40];
-char dateGPS[22];
-unsigned int timeNewFile[2] = {0, 0}; // Variable para configurar la hora a la que se desea generar un archivo nuevo (hh, mm)
-unsigned short confGPS[2] = {0, 1};   // Parametros que se pasan para configurar el GPS (conf, NMA) cuando conf=1 realiza la configuracion del GPS y se realiza una sola vez la primera vez que es utilizado
-unsigned short banNewFile;
-
-unsigned short contCiclos;
-unsigned short contador;
 
 // Variables para control de tiempo:
-int fuenteTiempo;
 unsigned short fuenteTiempoPic;
-unsigned short banTiempoRed, banTiempoRTC;
 char datePICStr[20];
 char datePicUNIX[15];
-char dateRedUNIX[15];
 struct tm datePIC;
-// struct tm dateRed;
-long tiempoPicUNIX, tiempoRedUNIX, deltaUNIX;
+long tiempoPicUNIX;
 
 // Variables para extraer los datos de configuracion:
 char id[10];
-char deteccion_eventos[10];
-char publicacion_eventos[10];
 
-// Variables para crear los archivos de datos:
-char temporalRegistroContinuo[35];
-char archivoEventoDetectado[35];
-char archivoActualRegistroContinuo[35];
-
-// Variavle para mensajes log 
+// Variable para mensajes log
 char mensaje_log[256];
 
 FILE *fp;
-FILE *ftmp;
-FILE *fTramaTmp;
-FILE *ficheroDatosConfiguracion;
-FILE *obj_fp;
 
 const char *config_filename;
 
+// Variables globales para tracking de rotación de archivos
+static int hora_archivo_actual = -1;
+static volatile sig_atomic_t debe_terminar = 0;
+
 // Metodo para manejar el tiempo del sistema
 int ComprobarNTP();
+
+// Metodos para rotación automática de archivos
+bool debe_rotar_archivo();
+int crear_nuevo_archivo();
+void manejador_senal_terminacion(int signum);
 
 // Metodos para la comunicacion con el dsPIC
 int ConfiguracionPrincipal();
 void write_log(const char *type, const char *message);
 void handle_sigpipe(int sig);
-void LeerArchivoConfiguracion();
-void CrearArchivos();
 void GuardarVector(unsigned char *tramaD);
 void ObtenerOperacion();                      // C:0xA0    F:0xF0
 void IniciarMuestreo();                       // C:0xA1	F:0xF1
-void DetenerMuestreo();                       // C:0xA2	F:0xF2
 void NuevoCiclo();                            // C:0xA3	F:0xF3
 void EnviarTiempoLocal();                     // C:0xA4	F:0xF4
 void ObtenerTiempoPIC();                      // C:0xA5	F:0xF5
 void ObtenerReferenciaTiempo(int referencia); // C:0xA6	F:0xF6
-void SetRelojLocal(unsigned char *tramaTiempo);
 
 
 // Declaración global
@@ -124,22 +101,13 @@ int main(void)
     // Inicializa las variables:
     i = 0;
     x = 0;
-    contMuestras = 0;
-    banFile = 0;
-    banNewFile = 0;
-    numBytes = 0;
-    contCiclos = 0;
-    contador = 0;
-
-    banTiempoRed = 0;
-    banTiempoRTC = 0;
 
     
     // Realiza la configuracion principal:
     ConfiguracionPrincipal();
 
     // Comprueba si el equipo esta sincronizado con el tiempo de red:
-    banTiempoRed = ComprobarNTP();
+    ComprobarNTP();
 
     // Inicializa la variable config_filename considerando la variable de entorno de la raiz del proyecto
     const char *project_local_root = getenv("PROJECT_LOCAL_ROOT");
@@ -184,32 +152,24 @@ int main(void)
         ObtenerReferenciaTiempo(0);
     }
 
-    // Comprueba la configuracion de deteccion de eventos 
-    strncpy(deteccion_eventos, datos_configuracion->deteccion_eventos, sizeof(deteccion_eventos) - 1);
-    deteccion_eventos[sizeof(deteccion_eventos) - 1] = '\0'; // Asegurar la terminación nula
-    if ((strcmp(deteccion_eventos, "si") == 0) || (strcmp(deteccion_eventos, "no") == 0))
-    {
-        printf("Deteccion de eventos: %s\n", datos_configuracion->deteccion_eventos);
-        // Guarda en el archivo log los datos de configuracion recuperados del archivo JSON
-        snprintf(mensaje_log, sizeof(mensaje_log), "Deteccion de eventos: %s", datos_configuracion->deteccion_eventos);
-        write_log("INFO", mensaje_log);
-        // Si la deteccion de eventos esta activa inicializa el filtro FIR
-        if (strcmp(deteccion_eventos, "si") == 0)
-        {
-            firFloatInit();
-        } 
-    } 
-    else
-    {
-        fprintf(stderr, "Advertencia: No se pudo leer la configuracion de deteccion de eventos. Revise el archivo de configuracion.\n");
-        write_log("WARNING", "No se pudo leer la configuracion de deteccion de eventos");
-    }
-        
     // Liberar la memoria del struct datos_config
     free(datos_configuracion);
 
     // Configurar el manejador de SIGPIPE
     signal(SIGPIPE, handle_sigpipe);
+
+    // Configurar manejadores de señales para terminación limpia
+    signal(SIGTERM, manejador_senal_terminacion);
+    signal(SIGINT, manejador_senal_terminacion);
+
+    // Crear archivo inicial de adquisición
+    write_log("INFO", "Creando archivo inicial de adquisición...");
+    if (crear_nuevo_archivo() != 0) {
+        write_log("CRITICAL", "FATAL: No se pudo crear archivo inicial");
+        bcm2835_spi_end();
+        bcm2835_close();
+        exit(EXIT_FAILURE);
+    }
 
     // Crear el named pipe
     if (mkfifo(PIPE_NAME, 0666) == -1) {
@@ -230,17 +190,24 @@ int main(void)
         write_log("INFO", "Estado del pipe: Creado con exito");
     } 
 
-    // Bucle infinito
-    while (1)
+    // Bucle principal (modificado para permitir cierre limpio)
+    while (!debe_terminar)
     {
         //delay(10);
         __asm__("nop");  // Instrucción "no operation" para evitar optimización excesiva
     }
 
+    // Código de cierre limpio al recibir señal de terminación
+    if (fp != NULL) {
+        fclose(fp);
+        write_log("INFO", "Archivo cerrado limpiamente antes de terminar");
+    }
+
     bcm2835_spi_end();
     bcm2835_close();
 
-    return 0;
+    write_log("INFO", "PROGRAMA FINALIZADO: registro_continuo");
+    exit(EXIT_SUCCESS);
 }
 
 int ConfiguracionPrincipal()
@@ -332,127 +299,170 @@ int ComprobarNTP() {
 }
 
 
-void CrearArchivos()
-{
-    
-    char dir_registro_continuo[100];
-    char dir_eventos_detectados[100];
-    char dir_archivos_temporales[100];
+//**************************************************************************************************************************************
+// Funciones para rotación automática de archivos:
 
-    char extBin[5];
-    char extTxt[5];
-    char extTmp[5];
-    char nombreActualARC[25];
-    char nombreAnteriorARC[26];
-    char timestamp[35];
+// Función para verificar si debe rotar el archivo
+bool debe_rotar_archivo() {
+    time_t tiempo_actual;
+    struct tm *tm_actual;
 
-    char filenameArchivoRegistroContinuo[100];
-    char filenameEventosDetectados[100];
-    char filenameActualRegistroContinuo[100];
-    
-    
-    printf("\nLeyendo archivo de configuracion...\n");
+    // Obtener tiempo actual
+    tiempo_actual = time(NULL);
+    tm_actual = localtime(&tiempo_actual);
 
-    // Abre y lee el archivo de configuración JSON
-    struct datos_config *config = compilar_json(config_filename);
-    if (config == NULL) {
-        fprintf(stderr, "Error al leer el archivo de configuracion JSON.\n");
-        return;
+    // Caso especial: primera vez (no inicializado)
+    if (hora_archivo_actual == -1) {
+        return true;
     }
 
-    // Asignar los valores leídos del archivo JSON a las variables correspondientes
-    strncpy(id, config->id, sizeof(id) - 1);
-    strncpy(dir_archivos_temporales, config->archivos_temporales, sizeof(dir_archivos_temporales) - 1);
-    strncpy(dir_registro_continuo, config->registro_continuo, sizeof(dir_registro_continuo) - 1);
-    strncpy(dir_eventos_detectados, config->eventos_detectados, sizeof(dir_eventos_detectados) - 1);
-    id[sizeof(id) - 1] = '\0';  // Asegurar la terminación nula
-    dir_archivos_temporales[sizeof(dir_archivos_temporales) - 1] = '\0';
-    dir_registro_continuo[sizeof(dir_registro_continuo) - 1] = '\0';
-    dir_eventos_detectados[sizeof(dir_eventos_detectados) - 1] = '\0';
+    // Verificar si cambió la hora del reloj
+    if (tm_actual->tm_hour != hora_archivo_actual) {
+        return true;
+    }
 
-    // Asigna el texto correspondiente a los array de caracteres
-    strcpy(extBin, ".dat");
-    strcpy(extTxt, ".txt");
-    strcpy(extTmp, ".tmp");
+    return false;
+}
 
-    // Se crean los archivos necesarios para almacenar los datos:
-    printf("\nSe crearon los archivos:\n");
-
-    // Obtiene la hora y la fecha del sistema:
+// Función para crear un nuevo archivo de adquisición
+int crear_nuevo_archivo() {
+    char timestamp[35];
+    char nuevo_archivo[100];
+    char archivo_anterior[100];
     time_t t;
     struct tm *tm;
+    struct stat st;
+
+    // Paso 1: Obtener tiempo actual del sistema
     t = time(NULL);
     tm = localtime(&t);
 
-    // Crea el archivo binario para los datos de registro continuo:
+    // Guardar nombre del archivo anterior si existe
+    if (fp != NULL) {
+        strncpy(archivo_anterior, filenameTemporalRegistroContinuo, sizeof(archivo_anterior) - 1);
+        archivo_anterior[sizeof(archivo_anterior) - 1] = '\0';
+    }
+
+    // Paso 2: Generar timestamp
     strftime(timestamp, sizeof(timestamp), "%y%m%d-%H%M%S", tm);
-    snprintf(filenameArchivoRegistroContinuo, sizeof(filenameArchivoRegistroContinuo), "%s%s_%s%s", dir_registro_continuo, id, timestamp, extBin);
-    printf("   %s\n", filenameArchivoRegistroContinuo);
-    fp = fopen(filenameArchivoRegistroContinuo, "ab+");
+
+    // Paso 3: Leer configuración para construir ruta completa
+    struct datos_config *config = compilar_json(config_filename);
+    if (config == NULL) {
+        write_log("ERROR", "No se pudo leer configuración para rotación de archivo");
+        return -1;
+    }
+
+    // Construir ruta completa del nuevo archivo
+    snprintf(nuevo_archivo, sizeof(nuevo_archivo), "%s%s_%s.dat",
+             config->registro_continuo,
+             config->id,
+             timestamp);
+
+    // Paso 4: Cerrar archivo anterior si existe
+    if (fp != NULL) {
+        fclose(fp);
+
+        // Obtener tamaño del archivo cerrado
+        if (stat(archivo_anterior, &st) == 0) {
+            double tamaño_mb = (double)st.st_size / (1024.0 * 1024.0);
+            snprintf(mensaje_log, sizeof(mensaje_log),
+                     "Archivo completado y cerrado: %s (%.2f MB)",
+                     archivo_anterior, tamaño_mb);
+            write_log("INFO", mensaje_log);
+        } else {
+            snprintf(mensaje_log, sizeof(mensaje_log),
+                     "Archivo completado y cerrado: %s",
+                     archivo_anterior);
+            write_log("INFO", mensaje_log);
+        }
+    }
+
+    // Paso 5: Abrir nuevo archivo
+    fp = fopen(nuevo_archivo, "wb");
     if (fp == NULL) {
-        fprintf(stderr, "Error al crear el archivo de registro continuo.\n");
-        free(config); // Liberar memoria en caso de error
-        return;
+        snprintf(mensaje_log, sizeof(mensaje_log),
+                 "ERROR CRÍTICO: No se pudo crear archivo %s",
+                 nuevo_archivo);
+        write_log("CRITICAL", mensaje_log);
+        free(config);
+        return -1;
     }
 
-    // Crea el archivo temporal para los datos de registro continuo:
-    snprintf(filenameTemporalRegistroContinuo, sizeof(filenameTemporalRegistroContinuo), "%sTramaTemporal%s", dir_archivos_temporales, extTmp);
+    // Paso 6: Actualizar archivo temporal con nombres de archivos
+    // (Replicando lógica de CrearArchivos())
+    char filenameActualRegistroContinuo[100];
+    char nombreActualARC[50];
+    char nombreAnteriorARC[50];
+    FILE *ftmp_nombres;
 
-    // Crea el archivo de texto para guardar los eventos detectados:
-    snprintf(filenameEventosDetectados, sizeof(filenameEventosDetectados), "%s%s_EventosDetectados%s",dir_eventos_detectados, id, extTxt);
-    printf("   %s\n", filenameEventosDetectados);
-    obj_fp = fopen(filenameEventosDetectados, "a");
-    if (obj_fp == NULL) {
-        fprintf(stderr, "Error al crear el archivo de eventos detectados.\n");
-        fclose(fp); // Cerrar archivo abierto
-        free(config); // Liberar memoria en caso de error
-        return;
-    }
-    printf("   %s\n", filenameEventosDetectados);
+    // Construir ruta del archivo temporal de nombres
+    snprintf(filenameActualRegistroContinuo, sizeof(filenameActualRegistroContinuo),
+             "%sNombreArchivoRegistroContinuo.tmp", config->archivos_temporales);
 
-    // Crea el archivo temporal para guardar los nombres actual y anterior de los archivos RC:
-    snprintf(filenameActualRegistroContinuo, sizeof(filenameActualRegistroContinuo), "%sNombreArchivoRegistroContinuo%s", dir_archivos_temporales, extTmp);
-    printf("   %s\n", filenameActualRegistroContinuo);
-    ftmp = fopen(filenameActualRegistroContinuo, "rt");
-    if (ftmp == NULL) {
-        fprintf(stderr, "Error al abrir el archivo temporal para nombres de archivos RC.\n");
-        write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
-        fclose(fp); // Cerrar archivo abierto
-        fclose(obj_fp); // Cerrar archivo abierto
-        free(config); // Liberar memoria en caso de error
-        return;
-    }
-    fgets(nombreAnteriorARC, sizeof(nombreAnteriorARC), ftmp);
-    fclose(ftmp);
-
-    ftmp = fopen(filenameActualRegistroContinuo, "w+");
-    if (ftmp == NULL) {
-        fprintf(stderr, "Error al abrir el archivo temporal para escritura de nombres de archivos RC.\n");
-        write_log("WARNING", "No se pudo abrir el archivo temporal para escribir el nombre del archivos RC actual");
-        fclose(fp); // Cerrar archivo abierto
-        fclose(obj_fp); // Cerrar archivo abierto
-        free(config); // Liberar memoria en caso de error
-        return;
+    // Extraer solo el nombre del nuevo archivo (sin ruta completa)
+    const char *nombre_base_nuevo = strrchr(nuevo_archivo, '/');
+    if (nombre_base_nuevo != NULL) {
+        nombre_base_nuevo++; // Saltar el '/'
+    } else {
+        nombre_base_nuevo = nuevo_archivo;
     }
 
-    snprintf(nombreActualARC, sizeof(nombreActualARC), "%s_%s%s\n", id, timestamp, extBin);
+    // Leer la primera línea del archivo temporal (será el "anterior" en el nuevo archivo)
+    ftmp_nombres = fopen(filenameActualRegistroContinuo, "rt");
+    if (ftmp_nombres != NULL) {
+        // Si el archivo existe, leer la primera línea (nombre actual que será anterior)
+        if (fgets(nombreAnteriorARC, sizeof(nombreAnteriorARC), ftmp_nombres) == NULL) {
+            strcpy(nombreAnteriorARC, "");
+        }
+        fclose(ftmp_nombres);
+    } else {
+        // Si no existe el archivo (primera vez), no hay anterior
+        strcpy(nombreAnteriorARC, "");
+    }
 
-    fwrite(nombreActualARC, sizeof(char), strlen(nombreActualARC), ftmp);
-    fwrite(nombreAnteriorARC, sizeof(char), strlen(nombreAnteriorARC), ftmp);
+    // Escribir nuevo archivo temporal con nombre actual y anterior
+    ftmp_nombres = fopen(filenameActualRegistroContinuo, "w");
+    if (ftmp_nombres != NULL) {
+        // Construir nombre actual (solo nombre base, no ruta completa)
+        snprintf(nombreActualARC, sizeof(nombreActualARC), "%s\n", nombre_base_nuevo);
 
-    printf("\nArchivo RC Actual: %s\n", nombreActualARC);
-    printf("Archivo RC Anterior: %s\n\n", nombreAnteriorARC);
+        // Escribir nombre actual
+        fwrite(nombreActualARC, sizeof(char), strlen(nombreActualARC), ftmp_nombres);
 
-    snprintf(mensaje_log, sizeof(mensaje_log), "Archivo binario creado: %s\n", nombreActualARC);
+        // Escribir nombre anterior (si existe)
+        if (strlen(nombreAnteriorARC) > 0) {
+            fwrite(nombreAnteriorARC, sizeof(char), strlen(nombreAnteriorARC), ftmp_nombres);
+        }
+
+        fclose(ftmp_nombres);
+    } else {
+        write_log("WARNING", "No se pudo actualizar archivo temporal de nombres");
+    }
+
+    // Paso 7: Actualizar variables globales
+    strncpy(filenameTemporalRegistroContinuo, nuevo_archivo, sizeof(filenameTemporalRegistroContinuo) - 1);
+    filenameTemporalRegistroContinuo[sizeof(filenameTemporalRegistroContinuo) - 1] = '\0';
+    hora_archivo_actual = tm->tm_hour;
+
+    // Paso 8: Logging exitoso
+    snprintf(mensaje_log, sizeof(mensaje_log),
+             "Nuevo archivo de adquisición creado: %s",
+             nuevo_archivo);
     write_log("INFO", mensaje_log);
 
-    fclose(ftmp);
-
-    // Liberar la memoria del struct datos_config
     free(config);
+    return 0;
 }
 
-
+// Manejador de señal para terminación limpia
+void manejador_senal_terminacion(int signum) {
+    debe_terminar = 1;
+    snprintf(mensaje_log, sizeof(mensaje_log),
+             "Señal de terminación recibida (%d), cerrando limpiamente...",
+             signum);
+    write_log("INFO", mensaje_log);
+}
 
 //**************************************************************************************************************************************
 // Comunicacion RPi-dsPIC:
@@ -520,11 +530,6 @@ void NuevoCiclo()
     GuardarVector(tramaDatos); // Guarda la el vector tramaDatos en el archivo binario
     // CrearArchivos();           //Crea un archivo nuevo si se cumplen las condiciones
 
-    // Llama al metodo para determinar si existe o no un evento sismico:
-    if (strcmp(deteccion_eventos, "si") == 0){
-        DetectarEvento(tramaDatos);
-    }
-    
 }
 
 // C:0xA4	F:0xF4
@@ -657,7 +662,10 @@ void ObtenerTiempoPIC()
     printf("Tiempo UNIX dsPIC: %d\n", tiempoPicUNIX);
     printf("****************************************\n");
 
-    CrearArchivos();
+    // NOTA: CrearArchivos() ya no se llama aquí porque ahora usamos crear_nuevo_archivo()
+    // que se ejecuta automáticamente en main() y en las rotaciones horarias
+    // CrearArchivos();
+
     IniciarMuestreo();
 }
 
@@ -696,7 +704,20 @@ void ObtenerReferenciaTiempo(int referencia)
 
 // Esta funcion sirve para guardar en el archivo binario las tramas de 1 segundo recibidas
 void GuardarVector(unsigned char *tramaD) {
-    
+
+    // Verificar si debe rotar el archivo
+    if (debe_rotar_archivo()) {
+        write_log("INFO", "Iniciando rotación de archivo...");
+
+        int resultado = crear_nuevo_archivo();
+
+        if (resultado != 0) {
+            write_log("ERROR", "Error en rotación de archivo, continuando con archivo actual");
+        } else {
+            write_log("INFO", "Rotación de archivo completada exitosamente");
+        }
+    }
+
     // Guardar la trama en el archivo de registro continuo
     if (fp != NULL) {
         size_t outFwrite;
@@ -733,41 +754,4 @@ void GuardarVector(unsigned char *tramaD) {
     }
     close(fd);
 
-}
-
-
-void SetRelojLocal(unsigned char *tramaTiempo)
-{
-    printf("Configurando hora de Red con la hora RTC...\n");
-    char datePIC[22];
-    // Configura el reloj interno de la RPi con la hora recuperada del PIC:
-    strcpy(comando, "sudo date --set "); // strcpy( <variable_destino>, <cadena_fuente> )
-    // Ejemplo: '2019-09-13 17:45:00':
-    datePIC[0] = 0x27; //'
-    datePIC[1] = '2';
-    datePIC[2] = '0';
-    datePIC[3] = (tramaTiempo[0] / 10) + 48; // dd
-    datePIC[4] = (tramaTiempo[0] % 10) + 48;
-    datePIC[5] = '-';
-    datePIC[6] = (tramaTiempo[1] / 10) + 48; // MM
-    datePIC[7] = (tramaTiempo[1] % 10) + 48;
-    datePIC[8] = '-';
-    datePIC[9] = (tramaTiempo[2] / 10) + 48;  // aa: (19/10)+48 = 49 = '1'
-    datePIC[10] = (tramaTiempo[2] % 10) + 48; //    (19%10)+48 = 57 = '9'
-    datePIC[11] = ' ';
-    datePIC[12] = (tramaTiempo[3] / 10) + 48; // hh
-    datePIC[13] = (tramaTiempo[3] % 10) + 48;
-    datePIC[14] = ':';
-    datePIC[15] = (tramaTiempo[4] / 10) + 48; // mm
-    datePIC[16] = (tramaTiempo[4] % 10) + 48;
-    datePIC[17] = ':';
-    datePIC[18] = (tramaTiempo[5] / 10) + 48; // ss
-    datePIC[19] = (tramaTiempo[5] % 10) + 48;
-    datePIC[20] = 0x27;
-    datePIC[21] = '\0';
-
-    strcat(comando, datePIC);
-
-    system(comando);
-    system("date");
 }
