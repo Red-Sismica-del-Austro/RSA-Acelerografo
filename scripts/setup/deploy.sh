@@ -53,6 +53,10 @@ cp $PROJECT_GIT_ROOT/scripts/operation/mseed/extract_segment.py $PROJECT_LOCAL_R
 cp $PROJECT_GIT_ROOT/scripts/operation/drive/gestor_archivos_acq.py $PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py
 cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_archivo.py
 
+# Crear el entorno virtual e instalar dependencias Python
+echo "Configurando entorno virtual Python..."
+bash $PROJECT_GIT_ROOT/scripts/setup/crear_entorno_virtual.sh
+
 # Copiar el task-script crontab.txt al directorio de proyectos
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt 

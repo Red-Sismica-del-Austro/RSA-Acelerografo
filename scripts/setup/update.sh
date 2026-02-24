@@ -134,4 +134,29 @@ function update_supervisor_config {
 # Llamar a la función
 update_supervisor_config
 
+# Función para actualizar el entorno virtual si requirements.txt ha cambiado
+function update_venv_if_changed {
+    local src_file="$PROJECT_GIT_ROOT/requirements.txt"
+    local venv_dir="$PROJECT_LOCAL_ROOT/.venv"
+    local backup_file="$PROJECT_LOCAL_ROOT/tmp-files/requirements_backup.txt"
+
+    if [ ! -d "$venv_dir" ]; then
+        echo "Entorno virtual no encontrado. Creando..."
+        bash "$PROJECT_GIT_ROOT/scripts/setup/crear_entorno_virtual.sh"
+        cp "$src_file" "$backup_file" 2>/dev/null || true
+        return
+    fi
+
+    if [ ! -f "$backup_file" ] || ! cmp -s "$src_file" "$backup_file"; then
+        echo "Detectados cambios en requirements.txt. Actualizando entorno virtual..."
+        "$venv_dir/bin/pip" install --upgrade -r "$src_file"
+        cp "$src_file" "$backup_file"
+    else
+        echo "No se detectaron cambios en requirements.txt"
+    fi
+}
+
+# Revisar y actualizar el entorno virtual
+update_venv_if_changed
+
 echo "Actualización completada con éxito."

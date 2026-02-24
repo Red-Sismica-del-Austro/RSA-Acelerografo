@@ -10,7 +10,8 @@ show_menu() {
   echo "1. Instalar librerías"
   echo "2. Desplegar el proyecto"
   echo "3. Actualizar el proyecto"
-  echo "4. Salir"
+  echo "4. Desinstalar librerías globales de Python"
+  echo "5. Salir"
   read -p "Ingrese el número de opción que desea ejecutar: " option
 }
 
@@ -58,13 +59,17 @@ while true; do
       exit 0
       ;;
     4)
+      echo "Desinstalando librerías Python globales..."
+      bash scripts/setup/desinstalar_librerias.sh
+      ;;
+    5)
       echo "Saliendo del programa..."
       echo "*****************************************************************"
       echo " "
       exit 0
       ;;
     *)
-      echo "Opción no válida, por favor ingrese un número del 0 al 4."
+      echo "Opción no válida, por favor ingrese un número del 0 al 5."
       ;;
   esac
   echo "*****************************************************************"
