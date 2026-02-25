@@ -24,3 +24,6 @@ pyopenssl
 # MQTT
 paho-mqtt
 python-dotenv
+
+# Machine Learning (inferencia con TensorFlow Lite)
+tflite-runtime

@@ -56,6 +56,7 @@ python3 -c "import paho.mqtt; print('  paho-mqtt: OK')" || echo "  ERROR: paho-m
 python3 -c "from dotenv import load_dotenv; print('  python-dotenv: OK')" || echo "  ERROR: python-dotenv no instalado"
 python3 -c "from googleapiclient.discovery import build; print('  google-api: OK')" || echo "  ERROR: google-api no instalado"
 python3 -c "from OpenSSL import crypto; print('  pyopenssl: OK')" || echo "  ERROR: pyopenssl no instalado"
+python3 -c "import tflite_runtime.interpreter as tflite; print('tflite ok')" || echo "  ERROR: tflite no instalado"
 
 deactivate
 
