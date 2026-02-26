@@ -8,7 +8,7 @@ This is a **seismograph data acquisition system** designed for continuous seismi
 
 ### System Architecture
 
-```
+```mermaid
 graph TD
     A[ADXL355 Sensor 250Hz] --> B[dsPIC33EP Firmware]
     B -- SPI --> C[Raspberry Pi]
@@ -88,6 +88,19 @@ Since development is typically done from a PC via `sshfs`, changes in `PROJECT_G
 **Important**: Never modify files directly in `$PROJECT_LOCAL_ROOT` as they will be overwritten during the next update.
 
 ## Initial Setup and Update Commands
+
+```mermaid
+graph TD
+    Start((Inicio)) --> Pull[git pull]
+    Pull --> Menu[bash menu.sh]
+    Menu --> Op0[0. Variables de Entorno]
+    Op0 --> Op1[1. Instalar Librerías + Venv]
+    Op1 --> Op2[2. Desplegar / 3. Actualizar]
+    Op2 --> End((Fin))
+    
+    style Start fill:#f9f,stroke:#333
+    style End fill:#f9f,stroke:#333
+```
 
 ```bash
 # For a new station setup:
@@ -196,6 +209,29 @@ $PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py <
 
 ## Project Structure
 
+```mermaid
+graph LR
+    Root["Acelerografo/"] --- Config["configuration/"]
+    Root --- Libs["main-libraries/"]
+    Root --- Docs["docs/"]
+    Root --- Req["requirements.txt"]
+    Root --- Scripts["scripts/"]
+
+    Docs --- Context["context/"]
+    
+    Scripts --- Env["env/"]
+    Scripts --- Setup["setup/"]
+    Scripts --- Op["operation/"]
+    Scripts --- Task["task/"]
+      
+    Op --- Acq["acelerografo/ (C)"]
+    Op --- Mseed["mseed/ (Py)"]
+    Op --- Drive["drive/ (Py)"]
+    Op --- MQTT["mqtt/ (Py)"]
+        
+    Root --- Menu["menu.sh"]
+```
+
 - `configuration/`: JSON config files
 - `main-libraries/`: bcm2835 and wiringPi for Raspberry Pi GPIO/SPI
 - `requirements.txt`: Python pip dependencies for the virtual environment
@@ -205,7 +241,7 @@ $PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py <
   - `operation/`: Core operational scripts (acelerografo C code, Python converters)
   - `task/`: Cron-scheduled task scripts
   - `dev-tests/`: Development/testing scripts
-- `docs/`: README and CHANGELOG
+- `docs/`: Scripts context files and CHANGELOG 
 - `menu.sh`: Interactive setup menu (options 0-5)
 
 ## Logging

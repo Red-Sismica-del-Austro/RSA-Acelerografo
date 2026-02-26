@@ -1,4 +1,16 @@
-# Instrucciones de Uso
+## Flujo de Trabajo
+
+```mermaid
+graph TD
+    Start((Inicio)) --> Menu[bash menu.sh]
+    Menu --> Op4[4. Limpieza Global]
+    Op4 --> Op1[1. Instalación Sistema + Venv]
+    Op1 --> Op2[2. Desplegar / 3. Actualizar]
+    Op2 --> End((Fin))
+    
+    style Op4 stroke-dasharray: 5 5
+    note[Nota: Opción 4 solo si hay basura global]
+```
 
 ## Configurar una Nueva Estación
 Para configurar una estación por primera vez, siga los siguientes pasos:
