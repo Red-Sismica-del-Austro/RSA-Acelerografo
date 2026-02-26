@@ -42,8 +42,10 @@ For in-depth technical information about each component, refer to these context 
 
 - **[Firmware (dsPIC33EP)](docs/context/firmware_context.md)** - Microcontroller firmware, sensor interface, time synchronization
 - **[Main Acquisition (registro_continuo)](docs/context/registro_continuo_context.md)** - C program on RPi, SPI communication, event detection
-- **[Format Conversion (binary_to_mseed)](docs/context/binary_to_mseed_context.md)** - Binary to Mini-SEED conversion, STEIM1 compression
-- **[File Management (gestor_archivos_acq)](docs/context/gestor_archivos_acq_context.md)** - Google Drive integration, disk space management
+- **[Format Conversion (binary_to_mseed)](docs/context/binary_to_mseed_context.md)** - Binary to Mini-SEED conversion, 4 operation modes, gap handling
+- **[Segment Extraction (extract_segment)](docs/context/extract_segment_context.md)** - Time-windowed extraction from Mini-SEED files
+- **[File Management (gestor_archivos_acq)](docs/context/gestor_archivos_acq_context.md)** - Google Drive integration, dual-mode storage management
+- **[MQTT Coordinator](docs/context/mqtt_coordinator_context.md)** - Reactive MQTT agent, telemetry, remote commands
 - **[System Orchestration (registrocontinuo.sh)](docs/context/orquestador_rc_context.md)** - Service control, cron jobs, boot sequence
 - **[Diagnostics (comprobar_registro)](docs/context/comprobar_registro_context.md)** - Status checking, debugging tools
 - **[Event Extraction](docs/context/extraer_evento_context.md)** - Extracting event windows from continuous data
@@ -146,21 +148,20 @@ All configuration files are in JSON format in the `configuration/` directory:
 - Custom libraries: `detector_eventos.c`, `lector_json.c`
 
 **Python Scripts**:
-- `scripts/operation/mseed/binary_to_mseed.py` (formerly `binary_to_mseed_2.1.1.py`): Converts binary to Mini-SEED
-  - Handles missing samples (gaps), invalid timestamps
-  - Supports 3 modes: `--modo rc` (continuous), `--modo ee` (event), `--modo archivo --nombre <file>`
+- `scripts/operation/mseed/binary_to_mseed.py`: Converts binary to Mini-SEED
+  - Handles missing samples (gaps), invalid timestamps, configurable date extraction (binary frame vs filename)
+  - Supports 4 modes: `--continuous` (mode 1), `--event` (mode 2), `--file <file>` (mode 3), `--dir <dir>` (mode 4)
 - `scripts/operation/mseed/extract_segment.py`: Extracts temporal segments from Mini-SEED files
-  - CLI tool for extracting specific time windows from hourly Mini-SEED files organized by date
-  - Uses UTC format exclusively (format: `YYYY-MM-DDZHH:MM:SS.fff`)
-  - Automatic file search by date and time range
-  - Maintains original filename format in output
-  - Supports all available channels and FLOAT32/STEIM2 encodings
+  - CLI tool: `--start "YYYY-MM-DDZHH:MM:SS.fff" --duration <seconds>`
+  - Automatic file discovery by date pattern, auto-detects FLOAT32/STEIM2 encoding
 - `scripts/operation/drive/gestor_archivos_acq.py`: File lifecycle manager
-  - Configurable disk space threshold via `umbral_espacio_minimo` in JSON (default behavior maintained)
-  - Configurable retry parameters: `max_reintentos` and `tiempo_espera` in device configuration
-  - Enhanced logging with exact free space percentages
-  - Fixed socket closure in internet connectivity checks to prevent memory leaks
-- `scripts/operation/mqtt/cliente.py`: MQTT client for status/event publishing
+  - Dual mode: online (Drive upload + retention + space control) / offline (maximize local storage)
+  - 3-level file protection: active file, failed upload, already uploaded
+  - Supports `--dry-run` for simulation without changes
+- `scripts/operation/mqtt/mqtt_coordinator.py`: Reactive MQTT agent (daemon via Supervisor)
+  - Publishes telemetry (state + hardware health every 5 min)
+  - Receives remote commands via dispatcher pattern
+  - Compatible with paho-mqtt v1.x and v2.x
 
 **Task Scripts** (in `scripts/task/`):
 - `registrocontinuo.sh`: Service control script (start/stop/restart)
@@ -185,7 +186,11 @@ Executables are placed in `$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/
 
 ### Manual file conversion
 ```bash
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/binary_to_mseed.py --modo archivo --nombre <filename.dat>
+# Single file
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/binary_to_mseed.py --file <filename.dat>
+
+# Batch convert entire directory
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/binary_to_mseed.py --dir /path/to/dat/files
 ```
 
 ### Extract temporal segments from Mini-SEED files
@@ -202,9 +207,10 @@ $PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/extract_segment.py
 
 ### Upload files to Drive
 ```bash
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py <filename> <type> <delete_after>
-# type: 1=binary, 2=event_mseed, 3=continuous_mseed
-# delete_after: 0=keep, 1=delete
+# Upload by type flag
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py --continuous <filename.dat>
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py --mseed <filename.mseed>
+$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py --event <filename.dat>
 ```
 
 ## Project Structure
@@ -241,13 +247,13 @@ graph LR
   - `operation/`: Core operational scripts (acelerografo C code, Python converters)
   - `task/`: Cron-scheduled task scripts
   - `dev-tests/`: Development/testing scripts
-- `docs/`: Scripts context files and CHANGELOG 
+- `docs/`: Scripts context files
 - `menu.sh`: Interactive setup menu (options 0-5)
 
 ## Logging
 
 All logs are in `$PROJECT_LOCAL_ROOT/log-files/`:
-- `drive.log`, `gestor_acq.log`, `mqtt.log`, `mseed.log`, `registro_continuo.log`
+- `drive.log`, `gestor_acq.log`, `mqtt_coordinator.log`, `mseed.log`, `registro_continuo.log`
 
 Each logger is identified by station ID from `configuracion_dispositivo.json`.
 
