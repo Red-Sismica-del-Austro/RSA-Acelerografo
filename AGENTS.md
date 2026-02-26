@@ -4,7 +4,14 @@ This file provides guidance to AI agents when working with code in this reposito
 
 ## Project Overview
 
-This is a **seismograph data acquisition system** designed for continuous seismic monitoring. The system uses a **dsPIC33EP microcontroller** interfaced with an **ADXL355 accelerometer** (250 Hz sampling, 3 axes) to capture acceleration data, which is then transferred to a **Raspberry Pi** via SPI for processing, storage, and optional cloud backup.
+This is a **seismograph data acquisition system** designed for continuous seismic monitoring. The system uses a **dsPIC33EP microcontroller** interfaced with an **ADXL355 accelerometer** (250 Hz sampling, 3 axes) to capture acceleration data, which is then transferred to a **Raspberry Pi 3B+ with Raspbian GNU/Linux 11 (bullseye)** via SPI for processing, storage, and optional cloud backup.
+
+## Instructions for AI Agents (🚨 READ FIRST)
+
+1. **Context Maintenance**: Every time you modify a script in `scripts/operation/` or `scripts/task/`, you **MUST** update its corresponding `.md` file in `docs/context/`. This ensures the documentation stays technically accurate for future agents.
+2. **Path Integrity**: Always use `$PROJECT_LOCAL_ROOT` for absolute paths in scripts, configuration, and logs. Never hardcode user-specific paths.
+3. **Structured Logging**: Use `StructuredLogger` for all operational scripts to maintain a unified and searchable audit trail.
+4. **Dry-run Safety**: When modifying file management or deletion logic, always implement or test with a `--dry-run` mode first to avoid accidental data loss.
 
 ### System Architecture
 
@@ -41,14 +48,12 @@ graph TD
 For in-depth technical information about each component, refer to these context files:
 
 - **[Firmware (dsPIC33EP)](docs/context/firmware_context.md)** - Microcontroller firmware, sensor interface, time synchronization
-- **[Main Acquisition (registro_continuo)](docs/context/registro_continuo_context.md)** - C program on RPi, SPI communication, event detection
+- **[Main Acquisition (registro_continuo)](docs/context/registro_continuo_context.md)** - C program on RPi, SPI communication, data storage
 - **[Format Conversion (binary_to_mseed)](docs/context/binary_to_mseed_context.md)** - Binary to Mini-SEED conversion, 4 operation modes, gap handling
 - **[Segment Extraction (extract_segment)](docs/context/extract_segment_context.md)** - Time-windowed extraction from Mini-SEED files
 - **[File Management (gestor_archivos_acq)](docs/context/gestor_archivos_acq_context.md)** - Google Drive integration, dual-mode storage management
 - **[MQTT Coordinator](docs/context/mqtt_coordinator_context.md)** - Reactive MQTT agent, telemetry, remote commands
-- **[System Orchestration (registrocontinuo.sh)](docs/context/orquestador_rc_context.md)** - Service control, cron jobs, boot sequence
-- **[Diagnostics (comprobar_registro)](docs/context/comprobar_registro_context.md)** - Status checking, debugging tools
-- **[Event Extraction](docs/context/extraer_evento_context.md)** - Extracting event windows from continuous data
+
 
 ## Environment Setup
 
@@ -82,8 +87,8 @@ All Python dependencies are managed through a virtual environment located at `$P
 Since development is typically done from a PC via `sshfs`, changes in `PROJECT_GIT_ROOT` are not immediately live on the Raspberry Pi's operational system.
 
 1. **Edit**: Modify files in the Git repository folder from your local machine.
-2. **Apply Changes**: You MUST run `menu.sh` on the Raspberry Pi.
-   - Use **Option 3 (Actualizar)** to sync code changes (Python, C binaries, or config templates).
+2. **Apply Changes**: The user MUST run `menu.sh` on the Raspberry Pi. The AI ​​agent should not run this option.
+   - Use **Option 3 (Actualizar)** to sync code changes (Python, C binaries, or config templates). 
    - Use **Option 2 (Desplegar)** ONLY for initial setup or clean installs (Warning: overwrites local configurations).
 3. **Verify**: Check logs in `$PROJECT_LOCAL_ROOT/log-files/` to ensure everything is running correctly.
 
