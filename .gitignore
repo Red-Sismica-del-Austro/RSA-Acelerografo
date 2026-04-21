@@ -1,5 +1,6 @@
 # Documentation context (local only, not for production)
-# docs/context/
+# Archivos locales
+local-RSA/
 
 # Google Drive Credentials
 configuration/drive_credentials.json

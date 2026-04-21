@@ -18,6 +18,7 @@ from structured_logger import StructuredLogger
 # ═══════════════════════════════════════════════════════════════════════════
 
 HEALTH_INTERVAL = 300    # segundos
+DAILY_REPUBLISH_HOUR = 0  # Hora para re-publicar estado diario (00:00)
 START_TIME = time.time()
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -53,6 +54,23 @@ def resolver_topico(config: dict, topic_key: str, **kwargs) -> str:
 def timestamp_iso() -> str:
     """Retorna timestamp actual en formato ISO8601 UTC."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def guardar_estado(estado: str, timestamp: str, state_file_path: str, logger: StructuredLogger):
+    """Guarda el estado y timestamp en un archivo JSON local, manteniendo los 3 estados."""
+    try:
+        data = {}
+        if os.path.exists(state_file_path) and os.path.getsize(state_file_path) > 0:
+            with open(state_file_path, 'r') as f:
+                data = json.load(f)
+        
+        # Actualizar solo el timestamp del estado correspondiente
+        data[estado] = timestamp
+        
+        with open(state_file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+        logger.info(f"[STATE_SAVE] Estado '{estado}' persistido localmente.")
+    except Exception as e:
+        logger.error(f"[STATE_SAVE_ERR] No se pudo guardar estado: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DISPATCHER DE COMANDOS
@@ -125,14 +143,16 @@ class EventCorrelator:
 # PUBLICACIÓN DE TELEMETRÍA
 # ═══════════════════════════════════════════════════════════════════════════
 
-def publicar_state(client, config: dict, estado: str, logger: StructuredLogger):
-    """Publica estado operacional (online/offline/on)."""
+def publicar_state(client, config: dict, estado: str, logger: StructuredLogger, timestamp_override: str = None):
+    """Publica estado operacional (online/offline/on). Retorna la información del mensaje (MQTTMessageInfo)."""
     topic = resolver_topico(config, "telemetry_state")
-    payload = {"status": estado, "timestamp": timestamp_iso()}
+    ts = timestamp_override if timestamp_override else timestamp_iso()
+    payload = {"status": estado, "timestamp": ts}
     qos = config["qos"]["telemetry"]
     retain = config["retain"]["telemetry_state"]
     result = client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
     logger.mqtt_publish(topic, "ok" if result.rc == 0 else "fail")
+    return result
 
 def obtener_metricas_hardware() -> dict:
     """Obtiene métricas de hardware de Raspberry Pi."""
@@ -216,6 +236,37 @@ def publicar_health(client, config: dict, logger: StructuredLogger):
 # CALLBACKS MQTT
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _persistir_offline(userdata):
+    """Callback diferido: persiste 'offline' tras debouncing."""
+    logger = userdata["logger"]
+    now_ts = timestamp_iso()
+    guardar_estado("offline", now_ts, userdata["state_file_path"], logger)
+    userdata["last_state_change"] = now_ts
+    userdata["is_disconnected_logged"] = True
+    userdata["offline_timer"] = None
+
+def on_publish(client, userdata, mid, *args, **kwargs):
+    """Callback invocado cuando el broker confirma la recepción (para QoS > 0)."""
+    logger = userdata["logger"]
+    
+    # Confirmación de la entrega de nuestro estado 'online'
+    if getattr(userdata, "get", lambda x: None) and mid in userdata.get("pending_online_mids", set()):
+        userdata["pending_online_mids"].remove(mid)
+        
+        now_ts = timestamp_iso()
+        logger.info(f"[CONNECT_CONFIRMED] Broker confirmó 'online' (mid={mid}). Conectividad real validada.")
+        
+        # Cancelar cualquier aviso de "offline" programado por fluctuaciones (debouncing)
+        offline_timer = userdata.get("offline_timer")
+        if offline_timer:
+            offline_timer.cancel()
+            userdata["offline_timer"] = None
+            
+        # Guardar estado real
+        guardar_estado("online", now_ts, userdata["state_file_path"], logger)
+        userdata["last_state_change"] = now_ts
+        userdata["is_disconnected_logged"] = False
+
 def on_connect(client, userdata, flags, rc, properties=None):
     """Callback de conexión al broker."""
     logger = userdata["logger"]
@@ -230,9 +281,31 @@ def on_connect(client, userdata, flags, rc, properties=None):
             client.subscribe(topic, qos=config["qos"].get("commands", 1))
             logger.mqtt_subscribe(topic, 1)
         
-        # Publicar estado online
-        publicar_state(client, config, "online", logger)
-        userdata["is_disconnected_logged"] = False
+        # Publicar estado online diferido si es el primer arranque
+        state_file = userdata["state_file_path"]
+        boot_ts = None
+        if not userdata["boot_published"]:
+            try:
+                if os.path.exists(state_file) and os.path.getsize(state_file) > 0:
+                    with open(state_file, 'r') as f:
+                        saved_data = json.load(f)
+                        boot_ts = saved_data.get("on")
+                
+                if boot_ts:
+                    logger.info(f"[BOOT_SYNC] Publicando estado 'on' diferido de {boot_ts}")
+                    publicar_state(client, config, "on", logger, timestamp_override=boot_ts)
+                
+                userdata["boot_published"] = True
+            except Exception as e:
+                logger.error(f"[BOOT_SYNC_ERR] Error leyendo {state_file}: {e}")
+
+        # Intentar publicar 'online'
+        now_ts = timestamp_iso()
+        msg_info = publicar_state(client, config, "online", logger, timestamp_override=now_ts)
+        
+        if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
+            userdata["pending_online_mids"].add(msg_info.mid)
+            logger.info(f"[CONNECT_SENT] Publish 'online' encolado (mid={msg_info.mid}). Esperando confirmación PUBACK...")
     else:
         logger.mqtt_error("connect", f"Código de error: {rc}")
 
@@ -242,9 +315,21 @@ def on_disconnect(client, userdata, flags, rc=None, properties=None):
     # En v1, flags es el código de retorno (rc). En v2, rc es el reason_code.
     real_rc = rc if rc is not None else flags
     
+    # Limpiamos intentos transitorios por desconexión
+    userdata["pending_online_mids"].clear()
+    
     if real_rc != 0 and not userdata.get("is_disconnected_logged", False):
         logger.mqtt_disconnect(f"Inesperada, código: {real_rc}")
-        userdata["is_disconnected_logged"] = True
+        
+        # Programar reporte offline (Debouncing de 10s)
+        offline_timer = userdata.get("offline_timer")
+        if offline_timer:
+            offline_timer.cancel()
+            
+        timer = threading.Timer(10.0, _persistir_offline, args=[userdata])
+        timer.daemon = True
+        timer.start()
+        userdata["offline_timer"] = timer
 
 def on_message(client, userdata, msg):
     """Callback para mensajes recibidos."""
@@ -283,18 +368,15 @@ def on_message(client, userdata, msg):
 # INICIALIZACIÓN Y LOOP PRINCIPAL
 # ═══════════════════════════════════════════════════════════════════════════
 
-def iniciar_cliente(config: dict, logger: StructuredLogger):
+def iniciar_cliente(config: dict, logger: StructuredLogger, userdata: dict):
     """Inicializa y configura el cliente MQTT."""
     dispatcher = CommandDispatcher(config, logger)
     correlator = EventCorrelator(config, logger)
     
-    userdata = {
-        "config": config,
-        "logger": logger,
+    userdata.update({
         "dispatcher": dispatcher,
         "correlator": correlator,
-        "is_disconnected_logged": False
-    }
+    })
     
     try:
         # Soporta Paho-MQTT v2.x con Callback API Version 2
@@ -305,6 +387,7 @@ def iniciar_cliente(config: dict, logger: StructuredLogger):
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
+    client.on_publish = on_publish
     
     # Configurar LWT
     lwt_topic = resolver_topico(config, "telemetry_state")
@@ -342,15 +425,30 @@ def main():
     )
     logger.init({"component": "mqtt_coordinator", "version": "1.0.0"})
     
+    # Persistir estado 'on' inicial localmente
+    state_file = os.path.join(LOG_DIR, "mqtt_state.json")
+    now_ts = timestamp_iso()
+    guardar_estado("on", now_ts, state_file, logger)
+    
+    # Preparar userdata para el cliente
+    userdata = {
+        "config": config,
+        "logger": logger,
+        "state_file_path": state_file,
+        "boot_published": False,
+        "last_state_change": None,
+        "is_disconnected_logged": False,
+        "pending_online_mids": set(),
+        "offline_timer": None
+    }
+    
     # Iniciar cliente
-    client = iniciar_cliente(config, logger)
+    client = iniciar_cliente(config, logger, userdata)
     client.loop_start()
     
-    # Publicar estado inicial
-    publicar_state(client, config, "on", logger)
-    
-    # Loop principal con timers de telemetría
+    # Loop principal con timers de telemetría y re-publicación diaria
     last_health = 0
+    last_day = datetime.now(timezone.utc).day
     
     try:
         while True:
@@ -359,6 +457,16 @@ def main():
             if now - last_health >= HEALTH_INTERVAL:
                 publicar_health(client, config, logger)
                 last_health = now
+            
+            # Re-publicación diaria a las 00:00
+            now_dt = datetime.now(timezone.utc)
+            if now_dt.day != last_day and now_dt.hour >= DAILY_REPUBLISH_HOUR:
+                last_change = userdata.get("last_state_change")
+                # Si no hay last_change (no conectó), no re-publicamos 'online'
+                if last_change:
+                    logger.info(f"[DAILY_SYNC] Re-publicando estado online (vía {last_change})")
+                    publicar_state(client, config, "online", logger, timestamp_override=last_change)
+                last_day = now_dt.day
             
             time.sleep(1)
             
