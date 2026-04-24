@@ -236,36 +236,10 @@ def publicar_health(client, config: dict, logger: StructuredLogger):
 # CALLBACKS MQTT
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _persistir_offline(userdata):
-    """Callback diferido: persiste 'offline' tras debouncing."""
-    logger = userdata["logger"]
-    now_ts = timestamp_iso()
-    guardar_estado("offline", now_ts, userdata["state_file_path"], logger)
-    userdata["last_state_change"] = now_ts
-    userdata["is_disconnected_logged"] = True
-    userdata["offline_timer"] = None
-
 def on_publish(client, userdata, mid, *args, **kwargs):
     """Callback invocado cuando el broker confirma la recepción (para QoS > 0)."""
-    logger = userdata["logger"]
-    
-    # Confirmación de la entrega de nuestro estado 'online'
-    if getattr(userdata, "get", lambda x: None) and mid in userdata.get("pending_online_mids", set()):
-        userdata["pending_online_mids"].remove(mid)
-        
-        now_ts = timestamp_iso()
-        logger.info(f"[CONNECT_CONFIRMED] Broker confirmó 'online' (mid={mid}). Conectividad real validada.")
-        
-        # Cancelar cualquier aviso de "offline" programado por fluctuaciones (debouncing)
-        offline_timer = userdata.get("offline_timer")
-        if offline_timer:
-            offline_timer.cancel()
-            userdata["offline_timer"] = None
-            
-        # Guardar estado real
-        guardar_estado("online", now_ts, userdata["state_file_path"], logger)
-        userdata["last_state_change"] = now_ts
-        userdata["is_disconnected_logged"] = False
+    # Delegamos la validación QoS 1 a la librería Paho-MQTT nativa
+    pass
 
 def on_connect(client, userdata, flags, rc, properties=None):
     """Callback de conexión al broker."""
@@ -304,8 +278,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
         msg_info = publicar_state(client, config, "online", logger, timestamp_override=now_ts)
         
         if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
-            userdata["pending_online_mids"].add(msg_info.mid)
-            logger.info(f"[CONNECT_SENT] Publish 'online' encolado (mid={msg_info.mid}). Esperando confirmación PUBACK...")
+            logger.info(f"[CONNECT_SENT] Publish 'online' encolado (mid={msg_info.mid}). Delegando a Paho-MQTT.")
+            guardar_estado("online", now_ts, userdata["state_file_path"], logger)
+            userdata["last_state_change"] = now_ts
+            userdata["is_disconnected_logged"] = False
     else:
         logger.mqtt_error("connect", f"Código de error: {rc}")
 
@@ -315,21 +291,14 @@ def on_disconnect(client, userdata, flags, rc=None, properties=None):
     # En v1, flags es el código de retorno (rc). En v2, rc es el reason_code.
     real_rc = rc if rc is not None else flags
     
-    # Limpiamos intentos transitorios por desconexión
-    userdata["pending_online_mids"].clear()
-    
     if real_rc != 0 and not userdata.get("is_disconnected_logged", False):
         logger.mqtt_disconnect(f"Inesperada, código: {real_rc}")
         
-        # Programar reporte offline (Debouncing de 10s)
-        offline_timer = userdata.get("offline_timer")
-        if offline_timer:
-            offline_timer.cancel()
-            
-        timer = threading.Timer(10.0, _persistir_offline, args=[userdata])
-        timer.daemon = True
-        timer.start()
-        userdata["offline_timer"] = timer
+        # Reporte offline reactivo (inmediato)
+        now_ts = timestamp_iso()
+        guardar_estado("offline", now_ts, userdata["state_file_path"], logger)
+        userdata["last_state_change"] = now_ts
+        userdata["is_disconnected_logged"] = True
 
 def on_message(client, userdata, msg):
     """Callback para mensajes recibidos."""
@@ -397,7 +366,19 @@ def iniciar_cliente(config: dict, logger: StructuredLogger, userdata: dict):
     # Conectar
     broker = config["broker"]
     client.username_pw_set(broker["username"], broker["password"])
-    client.connect(broker["address"], broker["port"], keepalive=60)
+    
+    retry_delay = 2
+    while True:
+        try:
+            client.connect(broker["address"], broker["port"], keepalive=60)
+            break
+        except OSError as e:
+            if "101" in str(e) or e.errno == 101:
+                logger.warning(f"[NETWORK_ERR] Red inalcanzable (Errno 101). Reintentando en {retry_delay}s...")
+            else:
+                logger.warning(f"[NETWORK_ERR] Error de conexión OS: {e}. Reintentando en {retry_delay}s...")
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
     
     return client
 
@@ -437,9 +418,7 @@ def main():
         "state_file_path": state_file,
         "boot_published": False,
         "last_state_change": None,
-        "is_disconnected_logged": False,
-        "pending_online_mids": set(),
-        "offline_timer": None
+        "is_disconnected_logged": False
     }
     
     # Iniciar cliente
