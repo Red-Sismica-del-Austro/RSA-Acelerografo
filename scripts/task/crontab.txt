@@ -1,18 +1,11 @@
-# Reinicia el registro continuo cada x horas: 
-#0 */6 * * * /usr/local/bin/registrocontinuo restart
-0 * * * * /usr/local/bin/registrocontinuo restart
+# Inicia el registro continuo cada x horas: 
+0 * * * * sleep 30 && /usr/local/bin/registrocontinuo start
 
 # Resetea el circuito al iniciar el sistem:
 @reboot sleep 30 && /usr/local/bin/resetmaster
 
-# Verifica si existen archivos pendientes de subir a Drive:
-@reboot sleep 60 && /usr/local/bin/uploadpendingfiles
-
 # Espera 180 segundos al arranque del sistema para ejecutar el registro continuo:
 @reboot sleep 180 && /usr/local/bin/registrocontinuo start
-
-# Limpia los archivos del registro continuo el primer dia de cada mes:
-#10 0 1 * * python3 /home/rsa/ejecutables/LimpiarArchivosRegistro.py
 
 # Copia esta configuracion unicamente en el equipo CHA02:
 #@reboot sleep 60 && sudo /etc/network/rutasEstaticas.sh

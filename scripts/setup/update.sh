@@ -34,7 +34,7 @@ function update_files_if_changed {
 
 # Función para actualizar el crontab si se detectan cambios en el archivo de origen
 function update_crontab_if_changed {
-    local src_file="$PROJECT_LOCAL_ROOT/scripts/task/crontab.txt"
+    local src_file="$PROJECT_LOCAL_ROOT/configuracion/crontab.txt"
     local backup_file="$PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt"
 
     # Verificar si el archivo de origen existe

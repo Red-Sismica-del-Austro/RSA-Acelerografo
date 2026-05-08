@@ -56,7 +56,7 @@ echo "Configurando entorno virtual Python..."
 bash $PROJECT_GIT_ROOT/scripts/setup/crear_entorno_virtual.sh
 
 # Copiar el task-script crontab.txt al directorio de proyectos
-cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
+cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/configuracion/
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt 
 
 # Copiar los archivos de configuracion de Supervisor al directorio de configuracion (procesando placeholders)
