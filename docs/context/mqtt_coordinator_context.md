@@ -97,12 +97,19 @@ Recibidos vía `cmd/+`, procesados por `CommandDispatcher`:
 | `restart_acquisition` | `_cmd_restart_acquisition()` | ❌ TODO |
 | `cleanup_files` | `_cmd_cleanup_files()` | ❌ TODO |
 | `get_status` | `_cmd_get_status()` | ✅ Funcional |
+| `extract_event` | `_cmd_extract_event()` | ✅ Funcional (Asíncrono) |
 
-**Flujo de comando**:
+**Flujo de comando regular**:
 1. Mensaje llega a `…/{id}/cmd/{task_name}`
 2. `on_message()` detecta `/cmd/` en tópico, extrae `task_name`
 3. `dispatcher.dispatch(task_name, payload, client)` → ejecuta handler
-4. Respuesta publicada en `…/{id}/cmd/{task_name}/res`
+4. Respuesta publicada en `…/{id}/cmd/{task_name}/res` (si el handler no retorna `None`)
+
+**Flujo de extracción asíncrono (`extract_event`)**:
+1. El handler responde inmediatamente un ACK (`"status": "accepted"`).
+2. Se lanza un hilo (`threading.Thread`) que invoca al orquestador `event_extractor.py`.
+3. El orquestador ejecuta `extract_segment.py` (.venv) y `subir_archivo.py` (sistema) como subprocesos aislados.
+4. El hilo finaliza y publica el resultado (`"completed"` o `"error"`) de forma asíncrona.
 
 ---
 
@@ -128,6 +135,8 @@ Recibidos vía `cmd/+`, procesados por `CommandDispatcher`:
 | `publicar_state(client, config, estado, logger)` | Publica estado con retain |
 | `publicar_health(client, config, logger)` | Publica métricas hardware |
 | `obtener_metricas_hardware()` | Lee disk/RAM/CPU/throttled de la RPi |
+| `event_extractor.py` (Módulo) | Orquesta de forma segura (con `subprocess`) la ejecución aislada de extracciones miniSEED y su carga a Drive. |
+| `test_event_extractor.py` (Script) | Utilidad de diagnóstico y prueba local sin depender de la conexión MQTT.
 
 ---
 

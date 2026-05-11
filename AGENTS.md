@@ -165,8 +165,12 @@ All configuration files are in JSON format in the `configuration/` directory:
   - Supports `--dry-run` for simulation without changes
 - `scripts/operation/mqtt/mqtt_coordinator.py`: Reactive MQTT agent (daemon via Supervisor)
   - Publishes telemetry (state + hardware health every 5 min)
-  - Receives remote commands via dispatcher pattern
+  - Receives remote commands via dispatcher pattern (e.g., `extract_event`)
   - Compatible with paho-mqtt v1.x and v2.x
+- `scripts/operation/mqtt/event_extractor.py`: Event extraction orchestrator
+  - Safely invokes `extract_segment.py` in venv and `subir_archivo.py` in system Python via `subprocess`
+  - Runs in a background thread to prevent blocking the MQTT loop
+- `scripts/operation/mqtt/test_event_extractor.py`: Diagnostic tool for the extraction pipeline
 
 **Task Scripts** (in `scripts/task/`):
 - `registrocontinuo.sh`: Service control script (start/stop/restart)
