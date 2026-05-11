@@ -13,6 +13,9 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from structured_logger import StructuredLogger
 
+# Importar orquestador de extracción de eventos
+from event_extractor import extraer_y_subir_evento
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIGURACIÓN Y CONSTANTES
 # ═══════════════════════════════════════════════════════════════════════════
@@ -86,7 +89,7 @@ class CommandDispatcher:
             "restart_acquisition": self._cmd_restart_acquisition,
             "cleanup_files": self._cmd_cleanup_files,
             "get_status": self._cmd_get_status,
-            # Agregar más comandos aquí
+            "extract_event": self._cmd_extract_event,
         }
     
     def dispatch(self, task_name: str, payload: dict, client) -> dict:
@@ -116,6 +119,91 @@ class CommandDispatcher:
             "uptime_s": int(time.time() - START_TIME),
             "timestamp": timestamp_iso()
         }
+
+    def _cmd_extract_event(self, payload: dict, client) -> None:
+        """
+        Extrae un evento sísmico y opcionalmente lo sube a Drive.
+
+        Publica un ACK inmediato ('accepted') y delega el pipeline
+        de extracción+subida a un hilo separado para no bloquear
+        el loop MQTT.
+
+        Payload esperado:
+            start (str, requerido):               Tiempo inicio ISO UTC con 'Z'
+            duration (float, requerido):           Duración en segundos
+            upload (bool, opcional, default True): Sube a Drive tras extraer
+            delete_after_upload (bool, opcional):  Borra local tras subida
+            request_id (str, opcional):            ID de rastreo
+
+        Returns:
+            None — la respuesta se publica manualmente en el hilo.
+        """
+        # Validar campos requeridos
+        start = payload.get("start")
+        duration = payload.get("duration")
+
+        if not start or duration is None:
+            res_topic = resolver_topico(self.config, "cmd_response", task_name="extract_event")
+            client.publish(res_topic, json.dumps({
+                "status": "error",
+                "message": "Campos requeridos: 'start' (str) y 'duration' (float)"
+            }), qos=1)
+            return None
+
+        request_id = payload.get("request_id", f"auto-{timestamp_iso()}")
+        upload = payload.get("upload", True)
+        delete_after = payload.get("delete_after_upload", False)
+
+        # ACK inmediato
+        res_topic = resolver_topico(self.config, "cmd_response", task_name="extract_event")
+        client.publish(res_topic, json.dumps({
+            "status": "accepted",
+            "request_id": request_id,
+            "timestamp": timestamp_iso(),
+            "message": "Extracción encolada"
+        }), qos=1)
+
+        self.logger.info(f"[EXTRACT_EVENT] Solicitud aceptada → request_id={request_id}, start={start}, duration={duration}s")
+
+        # Ejecutar pipeline en hilo separado
+        hilo = threading.Thread(
+            target=self._run_extraction_pipeline,
+            args=(client, request_id, start, duration, upload, delete_after),
+            daemon=True
+        )
+        hilo.start()
+
+        return None  # on_message verifica None antes de publicar
+
+    def _run_extraction_pipeline(self, client, request_id, start, duration, upload, delete_after):
+        """Pipeline de extracción + subida ejecutado en hilo separado."""
+        res_topic = resolver_topico(self.config, "cmd_response", task_name="extract_event")
+
+        try:
+            resultado = extraer_y_subir_evento(
+                start=start,
+                duration=duration,
+                upload=upload,
+                delete_after_upload=delete_after,
+                logger=self.logger
+            )
+            resultado["request_id"] = request_id
+            resultado["timestamp"] = timestamp_iso()
+            client.publish(res_topic, json.dumps(resultado), qos=1)
+            self.logger.info(
+                f"[EXTRACT_EVENT] Pipeline finalizado → "
+                f"status={resultado['status']}, archivo={resultado.get('output_file')}"
+            )
+
+        except Exception as e:
+            self.logger.error(f"[EXTRACT_EVENT_ERR] Excepción inesperada en pipeline: {e}")
+            client.publish(res_topic, json.dumps({
+                "status": "error",
+                "request_id": request_id,
+                "timestamp": timestamp_iso(),
+                "phase": "pipeline",
+                "message": str(e)
+            }), qos=1)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CORRELACIÓN DE EVENTOS (PLACEHOLDER)
@@ -319,10 +407,12 @@ def on_message(client, userdata, msg):
         # Extraer nombre del comando del tópico
         task_name = topic.split("/cmd/")[-1]
         response = dispatcher.dispatch(task_name, payload, client)
-        
-        # Publicar respuesta
-        res_topic = resolver_topico(config, "cmd_response", task_name=task_name)
-        client.publish(res_topic, json.dumps(response), qos=1)
+
+        # Publicar respuesta solo si el handler no la publicó por sí mismo
+        # (los handlers que gestionan su propia publicación retornan None)
+        if response is not None:
+            res_topic = resolver_topico(config, "cmd_response", task_name=task_name)
+            client.publish(res_topic, json.dumps(response), qos=1)
         
     elif "/events/detected" in topic and config["id"] not in topic:
         # Evento de otra estación (correlación regional)
