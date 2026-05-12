@@ -10,12 +10,14 @@
         "events_local": "{org}/{app}/{cap}/{id}/events/detected",
         "events_regional": "{org}/{app}/{cap}/+/events/detected",
         "cmd_execute": "{org}/{app}/{cap}/{id}/cmd/+",
+        "cmd_broadcast": "{org}/{app}/{cap}/broadcast/cmd/+",
         "cmd_response": "{org}/{app}/{cap}/{id}/cmd/{task_name}/res",
         "config_set": "{org}/{app}/{cap}/{id}/config/set"
     },
     "subscriptions": [
         "events_regional",
         "cmd_execute",
+        "cmd_broadcast",
         "config_set"
     ],
     "qos": {
