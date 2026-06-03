@@ -1,5 +1,5 @@
 {
-    "id": "NOM00",
+    "id": "{{ESTACION_ID}}",
     "org": "rsa",
     "app": "seismic",
     "cap": "smart",

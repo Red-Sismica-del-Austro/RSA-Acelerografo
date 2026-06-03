@@ -87,7 +87,15 @@ function update_task_scripts {
 update_crontab_if_changed
 
 # Revisar y actualizar archivos en configuración, mqtt, mseed, drive
-#update_files_if_changed "$PROJECT_GIT_ROOT/configuration/" "$PROJECT_LOCAL_ROOT/configuracion/"
+# Copiar y actualizar plantillas sin sobreescribir configuracion_maestra.json local si ya existe
+cp $PROJECT_GIT_ROOT/configuration/*.template $PROJECT_LOCAL_ROOT/configuracion/
+if [ ! -f "$PROJECT_LOCAL_ROOT/configuracion/configuracion_maestra.json" ]; then
+    echo "Instalando configuración maestra inicial..."
+    cp $PROJECT_GIT_ROOT/configuration/configuracion_maestra.json $PROJECT_LOCAL_ROOT/configuracion/
+fi
+# Re-hidratar configuraciones para aplicar posibles cambios en plantillas
+PROJECT_GIT_ROOT=$PROJECT_GIT_ROOT PROJECT_LOCAL_ROOT=$PROJECT_LOCAL_ROOT python3 $PROJECT_GIT_ROOT/scripts/setup/hidratar_configuracion.py
+
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mqtt/" "$PROJECT_LOCAL_ROOT/scripts/mqtt/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mseed/" "$PROJECT_LOCAL_ROOT/scripts/mseed/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/drive/" "$PROJECT_LOCAL_ROOT/scripts/drive/"

@@ -40,10 +40,12 @@ touch $PROJECT_LOCAL_ROOT/log-files/mqtt.log
 touch $PROJECT_LOCAL_ROOT/log-files/mseed.log
 touch $PROJECT_LOCAL_ROOT/log-files/registro_continuo.log
 
-# Copiar los archivos de configuración del proyecto en Git al proyecto local
-cp $PROJECT_GIT_ROOT/configuration/configuracion_dispositivo.json $PROJECT_LOCAL_ROOT/configuracion/
-cp $PROJECT_GIT_ROOT/configuration/configuracion_mqtt.json $PROJECT_LOCAL_ROOT/configuracion/
-cp $PROJECT_GIT_ROOT/configuration/configuracion_mseed.json $PROJECT_LOCAL_ROOT/configuracion/
+# Copiar la configuración maestra y las plantillas al proyecto local
+cp $PROJECT_GIT_ROOT/configuration/configuracion_maestra.json $PROJECT_LOCAL_ROOT/configuracion/
+cp $PROJECT_GIT_ROOT/configuration/*.template $PROJECT_LOCAL_ROOT/configuracion/
+
+# Ejecutar la hidratación de la configuración
+PROJECT_GIT_ROOT=$PROJECT_GIT_ROOT PROJECT_LOCAL_ROOT=$PROJECT_LOCAL_ROOT python3 $PROJECT_GIT_ROOT/scripts/setup/hidratar_configuracion.py
 
 # Copiar los scripts de Python del proyecto en Git al proyecto local
 cp $PROJECT_GIT_ROOT/scripts/operation/structured_logger.py $PROJECT_LOCAL_ROOT/scripts/structured_logger.py

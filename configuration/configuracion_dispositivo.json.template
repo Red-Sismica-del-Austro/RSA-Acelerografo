@@ -1,11 +1,11 @@
 {
     "dispositivo": {
-        "id": "NOM00",
-        "ubicacion": "ubicacion",
-        "fuente_reloj": "0",
-        "deteccion_eventos": "no",
-        "publicar_eventos": "no",
-        "modo_adquisicion": "offline"
+        "id": "{{ESTACION_ID}}",
+        "ubicacion": "{{UBICACION}}",
+        "fuente_reloj": "{{FUENTE_RELOJ}}",
+        "deteccion_eventos": "{{DETECCION_EVENTOS}}",
+        "publicar_eventos": "{{PUBLICAR_EVENTOS}}",
+        "modo_adquisicion": "{{MODO_ADQUISICION}}"
     },
     "directorios": {
         "registro_continuo": "/home/rsa/data/registro-continuo/",
@@ -15,11 +15,11 @@
     },
     "drive": {
         "carpetas": {
-            "continuos_id": "1Be03HDR...",
-            "mseed_id": "....",
-            "events_id": "....",
-            "tmp_id": "....",
-            "logs_id": "...."
+            "continuos_id": "{{DRIVE_CONTINUOS_ID}}",
+            "mseed_id": "{{DRIVE_MSEED_ID}}",
+            "events_id": "{{DRIVE_EVENTS_ID}}",
+            "tmp_id": "{{DRIVE_TMP_ID}}",
+            "logs_id": "{{DRIVE_LOGS_ID}}"
         },
         "config": {
             "max_reintentos": 5,

@@ -1,0 +1,23 @@
+{
+    "estacion_id": "NOM00",
+    "nombre": "NOMBRE_COMPLETO",
+    "ubicacion": "ubicacion",
+    "coordenadas": {
+        "latitud": -26.753,
+        "longitud": -790.283,
+        "altitud": 3423
+    },
+    "adquisicion": {
+        "fuente_reloj": "0",
+        "modo_adquisicion": "offline",
+        "deteccion_eventos": "no",
+        "publicar_eventos": "no"
+    },
+    "drive_folder_ids": {
+        "continuos_id": "1Be03HDR...",
+        "mseed_id": "....",
+        "events_id": "....",
+        "tmp_id": "....",
+        "logs_id": "...."
+    }
+}
