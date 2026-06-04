@@ -21,7 +21,7 @@
         "logs_id": "...."
     },
     "wifi_ap": {
-        "ssid": "ACEL-{{ESTACION_ID}}-CONFIG",
+        "ssid": "ACEL-CONFIG",
         "wpa_passphrase": "CambiarEstaContrasenaSegura123",
         "ocultar_red": "si",
         "canal": "7"
