@@ -27,3 +27,6 @@ python-dotenv
 
 # Machine Learning (inferencia con TensorFlow Lite)
 tflite-runtime
+
+# Panel web de configuración
+flask

@@ -25,6 +25,7 @@ mkdir -p $PROJECT_LOCAL_ROOT/scripts/mseed
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/mqtt
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/drive
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/task
+mkdir -p $PROJECT_LOCAL_ROOT/scripts/web
 
 # Asegurar que los directorios creados tengan la propiedad correcta (sin sudo)
 chown -R $USER:$USER $PROJECT_LOCAL_ROOT
@@ -52,6 +53,7 @@ cp $PROJECT_GIT_ROOT/scripts/operation/structured_logger.py $PROJECT_LOCAL_ROOT/
 cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/*.py $PROJECT_LOCAL_ROOT/scripts/mqtt/
 cp $PROJECT_GIT_ROOT/scripts/operation/mseed/*.py $PROJECT_LOCAL_ROOT/scripts/mseed/
 cp $PROJECT_GIT_ROOT/scripts/operation/drive/*.py $PROJECT_LOCAL_ROOT/scripts/drive/
+cp -r $PROJECT_GIT_ROOT/scripts/operation/web/. $PROJECT_LOCAL_ROOT/scripts/web/
 
 # Crear el entorno virtual e instalar dependencias Python
 echo "Configurando entorno virtual Python..."
@@ -65,10 +67,16 @@ cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/cron
 sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" $PROJECT_GIT_ROOT/scripts/task/mqtt_coordinator.conf > $PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf
 sudo cp $PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf /etc/supervisor/conf.d/
 
+sed -e "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" \
+    -e "s|{{PROJECT_GIT_ROOT}}|$PROJECT_GIT_ROOT|g" \
+    $PROJECT_GIT_ROOT/scripts/task/config_server.conf > $PROJECT_LOCAL_ROOT/tmp-files/config_server.conf
+sudo cp $PROJECT_LOCAL_ROOT/tmp-files/config_server.conf /etc/supervisor/conf.d/
+
 # Actualizar Supervisor
 sudo supervisorctl reread
 sudo supervisorctl update
 sudo supervisorctl start mqtt_coordinator
+sudo supervisorctl start config_server
 
 # Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do
