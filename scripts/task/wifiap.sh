@@ -39,6 +39,7 @@ do_install() {
     
     # 2. Deshabilitar los servicios para que no arranquen por defecto al bootear
     echo "Deshabilitando servicios para control a demanda..."
+    systemctl unmask hostapd 2>/dev/null || true
     systemctl disable hostapd dnsmasq
     systemctl stop hostapd dnsmasq 2>/dev/null || true
     
@@ -104,6 +105,7 @@ EOF
     systemctl restart dnsmasq
     
     echo "Iniciando hostapd..."
+    systemctl unmask hostapd 2>/dev/null || true
     systemctl restart hostapd
     
     # 6. Proteger el puerto 5000 en eth0 para evitar acceso externo no autenticado
