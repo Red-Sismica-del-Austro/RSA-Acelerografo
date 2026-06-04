@@ -53,3 +53,41 @@ Es muy importante que las rutas definidas en el archivo de configuración `confi
 
 ## Backups de Archivos de Configuración
 Antes de realizar una actualización, respalde el directorio de configuración con todos sus archivos.
+
+## 🌐 Panel Web de Configuración
+El proyecto incluye un servidor de configuración web Flask (`config_server.py`) que expone una interfaz interactiva para modificar la configuración de forma segura en caliente.
+* **Ubicación local:** `$PROJECT_LOCAL_ROOT/scripts/web/`
+* **Servicio:** Administrado mediante Supervisor (`config_server`).
+* **Seguridad:** Escucha en `0.0.0.0:5000` pero está protegido contra accesos externos vía Ethernet (`eth0`) por reglas de firewall aplicadas automáticamente al encender el AP.
+
+## 📶 Administración del Punto de Acceso WiFi (AP)
+Para configurar el acelerógrafo en el campo desde un dispositivo móvil, se utiliza el script de control `/usr/local/bin/wifiap`.
+
+### Comandos de control (ejecutar con `sudo`):
+* **Instalar dependencias e inicializar (solo la primera vez):**
+  ```bash
+  sudo wifiap install
+  ```
+  Esto instala `hostapd` y `dnsmasq`, desabilita el arranque automático por defecto y configura el alias DNS `config.local` que resuelve a `192.168.4.1`.
+  
+* **Activar el AP WiFi:**
+  ```bash
+  sudo wifiap enable
+  ```
+  Esto configura la IP estática `192.168.4.1` en `wlan0`, inicia el AP oculto y configura una regla en `iptables` que bloquea el acceso al puerto `5000` desde la interfaz Ethernet cableada (`eth0`).
+
+* **Desactivar el AP WiFi:**
+  ```bash
+  sudo wifiap disable
+  ```
+  Esto apaga el AP, elimina la configuración estática de `dhcpcd` y restaura el estado limpio de red.
+
+* **Consultar estado:**
+  ```bash
+  sudo wifiap status
+  ```
+
+### Acceso desde el móvil:
+1. Conectarse a la red WiFi del acelerógrafo (por defecto el SSID tiene la estructura `ACEL-NOM00-CONFIG`, donde `NOM00` es el ID del dispositivo. Se configura en `configuracion_maestra.json`). Al ser una red oculta, se debe añadir de manera manual e ingresar la contraseña establecida.
+2. Abrir en el navegador la dirección: `http://192.168.4.1:5000` o `http://config.local:5000`.
+

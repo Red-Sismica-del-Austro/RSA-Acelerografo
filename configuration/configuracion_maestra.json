@@ -19,5 +19,11 @@
         "events_id": "....",
         "tmp_id": "....",
         "logs_id": "...."
+    },
+    "wifi_ap": {
+        "ssid": "ACEL-{{ESTACION_ID}}-CONFIG",
+        "wpa_passphrase": "CambiarEstaContrasenaSegura123",
+        "ocultar_red": "si",
+        "canal": "7"
     }
 }

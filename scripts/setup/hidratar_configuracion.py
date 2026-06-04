@@ -75,7 +75,8 @@ def main():
     mappings = {
         "configuracion_dispositivo.json.template": "configuracion_dispositivo.json",
         "configuracion_mqtt.json.template": "configuracion_mqtt.json",
-        "configuracion_mseed.json.template": "configuracion_mseed.json"
+        "configuracion_mseed.json.template": "configuracion_mseed.json",
+        "hostapd.conf.template": "hostapd.conf"
     }
 
     # Asegurar que el directorio de salida existe
@@ -98,7 +99,7 @@ def main():
             with open(template_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Reemplazar marcadores
+            # Reemplazar marcadores generales
             content = content.replace("{{ESTACION_ID}}", str(config["estacion_id"]))
             content = content.replace("{{NOMBRE}}", str(config["nombre"]))
             content = content.replace("{{UBICACION}}", str(config.get("ubicacion", "ubicacion")))
@@ -117,6 +118,20 @@ def main():
             content = content.replace("{{DRIVE_EVENTS_ID}}", str(drive_ids.get("events_id", "")))
             content = content.replace("{{DRIVE_TMP_ID}}", str(drive_ids.get("tmp_id", "")))
             content = content.replace("{{DRIVE_LOGS_ID}}", str(drive_ids.get("logs_id", "")))
+
+            # Marcadores de WiFi AP (si existen en la plantilla)
+            if "wifi_ap" in config:
+                wifi_config = config["wifi_ap"]
+                # Resolver SSID dinámico que puede contener {{ESTACION_ID}}
+                ssid_template = wifi_config.get("ssid", "ACEL-{{ESTACION_ID}}-CONFIG")
+                ssid_resolved = ssid_template.replace("{{ESTACION_ID}}", str(config["estacion_id"]))
+                
+                content = content.replace("{{WIFI_SSID}}", ssid_resolved)
+                content = content.replace("{{WIFI_PASSPHRASE}}", str(wifi_config.get("wpa_passphrase", "CambiarEstaContrasenaSegura123")))
+                content = content.replace("{{WIFI_CHANNEL}}", str(wifi_config.get("canal", "7")))
+                
+                hidden_val = "1" if wifi_config.get("ocultar_red", "si") == "si" else "0"
+                content = content.replace("{{WIFI_HIDDEN}}", hidden_val)
 
             # Escribir archivo final
             with open(dest_path, 'w', encoding='utf-8') as f:

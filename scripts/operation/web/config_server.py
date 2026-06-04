@@ -454,7 +454,9 @@ if __name__ == "__main__":
     logger.info("Configuración maestra: %s", MASTER_CONFIG)
     logger.info("Script de hidratación: %s", HYDRATE_SCRIPT)
 
-    # El servidor escucha SOLO en localhost.
-    # TODO(security): Cambiar a 0.0.0.0 únicamente cuando se implemente
-    # autenticación HTTP y el modelo de acceso vía WiFi AP.
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # El servidor escucha en 0.0.0.0 para permitir acceso vía WiFi AP en wlan0.
+    # El puerto 5000 se protege contra accesos externos vía eth0 mediante reglas de iptables
+    # aplicadas por el script wifiap al activar el AP.
+    # TODO(security): Implementar autenticación HTTP (Basic Auth o Bearer token)
+    # para proteger adicionalmente la interfaz web.
+    app.run(host="0.0.0.0", port=5000, debug=False)
