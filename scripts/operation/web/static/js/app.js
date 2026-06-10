@@ -110,11 +110,7 @@ function poblarFormulario(config) {
     document.getElementById("modo_adquisicion").value    = config.adquisicion?.modo_adquisicion    ?? "offline";
     document.getElementById("deteccion_eventos").value   = config.adquisicion?.deteccion_eventos   ?? "no";
     document.getElementById("publicar_eventos").value    = config.adquisicion?.publicar_eventos    ?? "no";
-    document.getElementById("drive_continuos_id").value  = config.drive_folder_ids?.continuos_id   ?? "";
-    document.getElementById("drive_mseed_id").value      = config.drive_folder_ids?.mseed_id       ?? "";
-    document.getElementById("drive_events_id").value     = config.drive_folder_ids?.events_id      ?? "";
-    document.getElementById("drive_tmp_id").value        = config.drive_folder_ids?.tmp_id         ?? "";
-    document.getElementById("drive_logs_id").value       = config.drive_folder_ids?.logs_id        ?? "";
+
 
     // Actualizar el chip de estación en el header (solo textContent)
     $stationChip.textContent = config.estacion_id ?? "—";
@@ -139,11 +135,11 @@ function recogerPayload() {
             publicar_eventos:   document.getElementById("publicar_eventos").value,
         },
         drive_folder_ids: {
-            continuos_id: document.getElementById("drive_continuos_id").value.trim(),
-            mseed_id:     document.getElementById("drive_mseed_id").value.trim(),
-            events_id:    document.getElementById("drive_events_id").value.trim(),
-            tmp_id:       document.getElementById("drive_tmp_id").value.trim(),
-            logs_id:      document.getElementById("drive_logs_id").value.trim(),
+            continuos_id: _configActual?.drive_folder_ids?.continuos_id ?? "",
+            mseed_id:     _configActual?.drive_folder_ids?.mseed_id     ?? "",
+            events_id:    _configActual?.drive_folder_ids?.events_id    ?? "",
+            tmp_id:       _configActual?.drive_folder_ids?.tmp_id       ?? "",
+            logs_id:      _configActual?.drive_folder_ids?.logs_id      ?? "",
         },
     };
 }
