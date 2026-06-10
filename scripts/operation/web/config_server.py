@@ -127,7 +127,7 @@ def restrict_http_methods():
 # Validación de la configuración maestra
 # ---------------------------------------------------------------------------
 
-_ESTACION_ID_RE = re.compile(r'^[A-Z]{3}\d{2}$')
+_ESTACION_ID_RE = re.compile(r'^[A-Z]{3}\d$')
 _MODO_ADQUISICION_VALS = {"online", "offline"}
 _FUENTE_RELOJ_VALS     = {"0", "1"}
 _SI_NO_VALS            = {"si", "no"}
@@ -155,16 +155,17 @@ def _validar_configuracion(data: dict) -> list[str]:
     eid = data.get("estacion_id", "")
     if not isinstance(eid, str) or not _ESTACION_ID_RE.match(eid):
         errores.append(
-            f"'estacion_id' debe cumplir el formato RSA: 3 letras mayúsculas + 2 dígitos (ej: NOM00). Recibido: '{eid}'"
+            f"'estacion_id' debe cumplir el formato RSA: 3 letras mayúsculas + 1 dígito (ej: NOM0). Recibido: '{eid}'"
         )
 
-    # --- nombre y ubicacion ---
-    for campo in ("nombre", "ubicacion"):
-        val = data.get(campo, "")
-        if not isinstance(val, str) or not val.strip():
-            errores.append(f"'{campo}' no puede estar vacío.")
-        elif len(val) > 200:
-            errores.append(f"'{campo}' supera los 200 caracteres.")
+    # --- nombre (debe ser todo en mayúsculas) ---
+    nombre_val = data.get("nombre", "")
+    if not isinstance(nombre_val, str) or not nombre_val.strip():
+        errores.append("'nombre' no puede estar vacío.")
+    elif len(nombre_val) > 200:
+        errores.append("'nombre' supera los 200 caracteres.")
+    elif nombre_val != nombre_val.upper():
+        errores.append("'nombre' debe estar todo en mayúsculas (Ej: CHANLUD CIMA).")
 
     # --- coordenadas ---
     coords = data.get("coordenadas", {})

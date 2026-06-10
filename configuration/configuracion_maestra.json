@@ -1,7 +1,6 @@
 {
-    "estacion_id": "NOM00",
+    "estacion_id": "NOM0",
     "nombre": "NOMBRE_COMPLETO",
-    "ubicacion": "ubicacion",
     "coordenadas": {
         "latitud": -26.753,
         "longitud": -790.283,

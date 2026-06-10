@@ -64,18 +64,18 @@
                             id="estacion_id"
                             name="estacion_id"
                             class="field-input field-mono"
-                            maxlength="5"
-                            placeholder="NOM00"
-                            pattern="^[A-Z]{3}[0-9]{2}$"
+                            maxlength="4"
+                            placeholder="NOM0"
+                            pattern="^[A-Z]{3}[0-9]$"
                             required
                             autocomplete="off"
                             aria-describedby="estacion_id-hint"
                         >
-                        <span id="estacion_id-hint" class="field-hint">3 letras mayúsculas + 2 dígitos. Ej: NOM00, CHA01</span>
+                        <span id="estacion_id-hint" class="field-hint">3 letras mayúsculas + 1 dígito. Ej: NOM0, CHA1</span>
                     </div>
                     <div class="field-group">
                         <label for="nombre" class="field-label">
-                            Nombre Completo
+                            Nombre Completo (MAYÚSCULAS)
                             <span class="field-required" aria-label="campo obligatorio">*</span>
                         </label>
                         <input
@@ -84,22 +84,13 @@
                             name="nombre"
                             class="field-input"
                             maxlength="200"
-                            placeholder="Nombre descriptivo de la estación"
+                            placeholder="Ej: CHANLUD CIMA"
+                            pattern="^[A-ZÁÉÍÓÚÑ0-9\s,\.\-_]+$"
                             required
                             autocomplete="off"
+                            aria-describedby="nombre-hint"
                         >
-                    </div>
-                    <div class="field-group">
-                        <label for="ubicacion" class="field-label">Ubicación / Descripción</label>
-                        <input
-                            type="text"
-                            id="ubicacion"
-                            name="ubicacion"
-                            class="field-input"
-                            maxlength="200"
-                            placeholder="Ciudad, edificio, piso, etc."
-                            autocomplete="off"
-                        >
+                        <span id="nombre-hint" class="field-hint">Todo en letras mayúsculas. Ej: CHANLUD CIMA</span>
                     </div>
                 </div>
             </section>

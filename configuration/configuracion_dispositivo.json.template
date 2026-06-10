@@ -1,7 +1,6 @@
 {
     "dispositivo": {
         "id": "{{ESTACION_ID}}",
-        "ubicacion": "{{UBICACION}}",
         "fuente_reloj": "{{FUENTE_RELOJ}}",
         "deteccion_eventos": "{{DETECCION_EVENTOS}}",
         "publicar_eventos": "{{PUBLICAR_EVENTOS}}",

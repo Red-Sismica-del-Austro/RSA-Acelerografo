@@ -103,7 +103,6 @@ async function cargarEstado() {
 function poblarFormulario(config) {
     document.getElementById("estacion_id").value         = config.estacion_id        ?? "";
     document.getElementById("nombre").value              = config.nombre              ?? "";
-    document.getElementById("ubicacion").value           = config.ubicacion           ?? "";
     document.getElementById("latitud").value             = config.coordenadas?.latitud  ?? "";
     document.getElementById("longitud").value            = config.coordenadas?.longitud ?? "";
     document.getElementById("altitud").value             = config.coordenadas?.altitud  ?? "";
@@ -128,7 +127,6 @@ function recogerPayload() {
     return {
         estacion_id: document.getElementById("estacion_id").value.trim().toUpperCase(),
         nombre:      document.getElementById("nombre").value.trim(),
-        ubicacion:   document.getElementById("ubicacion").value.trim(),
         coordenadas: {
             latitud:  parseFloat(document.getElementById("latitud").value),
             longitud: parseFloat(document.getElementById("longitud").value),
@@ -153,13 +151,13 @@ function recogerPayload() {
 // ---------------------------------------------------------------------------
 // Validaciones del lado del cliente (espejo de las del backend)
 // ---------------------------------------------------------------------------
-const _ESTACION_RE = /^[A-Z]{3}\d{2}$/;
+const _ESTACION_RE = /^[A-Z]{3}\d$/;
 
 function validarPayload(p) {
     const errores = [];
 
     if (!_ESTACION_RE.test(p.estacion_id)) {
-        errores.push("Código de estación inválido. Debe ser 3 letras mayúsculas + 2 dígitos (ej: NOM00).");
+        errores.push("Código de estación inválido. Debe ser 3 letras mayúsculas + 1 dígito (ej: NOM0).");
         marcarCampoError("estacion_id", "Formato incorrecto");
     } else {
         limpiarCampoError("estacion_id");
@@ -168,6 +166,9 @@ function validarPayload(p) {
     if (!p.nombre) {
         errores.push("El nombre completo es obligatorio.");
         marcarCampoError("nombre", "Obligatorio");
+    } else if (p.nombre !== p.nombre.toUpperCase()) {
+        errores.push("El nombre completo debe estar todo en mayúsculas.");
+        marcarCampoError("nombre", "Debe estar en mayúsculas");
     } else { limpiarCampoError("nombre"); }
 
     if (isNaN(p.coordenadas.latitud) || p.coordenadas.latitud < -90 || p.coordenadas.latitud > 90) {
@@ -370,6 +371,13 @@ $btnReset.addEventListener("click", () => {
 
 // Auto-capitalizar estacion_id en tiempo real
 document.getElementById("estacion_id").addEventListener("input", function () {
+    const pos = this.selectionStart;
+    this.value = this.value.toUpperCase();
+    this.setSelectionRange(pos, pos);
+});
+
+// Auto-capitalizar nombre en tiempo real
+document.getElementById("nombre").addEventListener("input", function () {
     const pos = this.selectionStart;
     this.value = this.value.toUpperCase();
     this.setSelectionRange(pos, pos);

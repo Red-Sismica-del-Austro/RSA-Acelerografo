@@ -67,9 +67,9 @@ def main():
             sys.exit(1)
 
     estacion_id = config["estacion_id"]
-    # Formato estándar RSA: 3 letras y 2 números (ej: NOM00, CHA01, DEV00)
-    if not re.match(r'^[A-Z]{3}\d{2}$', estacion_id):
-        print(f"Advertencia: El 'estacion_id' ({estacion_id}) no cumple con el formato estándar RSA de 3 letras y 2 números (ej: NOM00).")
+    # Formato estándar RSA: 3 letras y 1 número (ej: NOM0, CHA1, DEV0)
+    if not re.match(r'^[A-Z]{3}\d$', estacion_id):
+        print(f"Advertencia: El 'estacion_id' ({estacion_id}) no cumple con el formato estándar RSA de 3 letras y 1 número (ej: NOM0).")
 
     # 3. Definir plantillas y archivos destino
     mappings = {
@@ -102,7 +102,6 @@ def main():
             # Reemplazar marcadores generales
             content = content.replace("{{ESTACION_ID}}", str(config["estacion_id"]))
             content = content.replace("{{NOMBRE}}", str(config["nombre"]))
-            content = content.replace("{{UBICACION}}", str(config.get("ubicacion", "ubicacion")))
             content = content.replace("{{LATITUD}}", str(config["coordenadas"].get("latitud", 0.0)))
             content = content.replace("{{LONGITUD}}", str(config["coordenadas"].get("longitud", 0.0)))
             content = content.replace("{{ALTITUD}}", str(config["coordenadas"].get("altitud", 0.0)))
