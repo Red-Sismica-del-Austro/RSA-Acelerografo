@@ -31,6 +31,8 @@ const $confirmModal   = document.getElementById("confirm-modal");
 const $modalDiff      = document.getElementById("modal-diff");
 const $btnModalCancel = document.getElementById("btn-modal-cancel");
 const $btnModalConfirm= document.getElementById("btn-modal-confirm");
+const $btnCheck       = document.getElementById("btn-check");
+const $checkOutput    = document.getElementById("check-output");
 
 // ---------------------------------------------------------------------------
 // Mostrar alertas globales
@@ -364,6 +366,144 @@ $btnReset.addEventListener("click", () => {
         });
     }
 });
+
+// ---------------------------------------------------------------------------
+// Diagnóstico del Registro — Botón "Comprobar"
+// Llama a /api/check, parsea la respuesta JSON y construye el DOM
+// de forma segura (solo textContent/createElement, nunca innerHTML).
+// ---------------------------------------------------------------------------
+
+/**
+ * Crea una tarjeta de dato individual para el grid de diagnóstico.
+ * @param {string} etiqueta - Texto de la etiqueta (MAYÚSCULAS).
+ * @param {string|number|null} valor - Valor a mostrar.
+ * @param {string} [claseValor] - Clase opcional: accent, success, warning, danger.
+ * @param {boolean} [spanFull] - Si true, la tarjeta ocupa el ancho completo.
+ * @returns {HTMLElement}
+ */
+function _crearTarjetaDato(etiqueta, valor, claseValor = "", spanFull = false) {
+    const item = document.createElement("div");
+    item.className = "check-data-item" + (spanFull ? " span-full" : "");
+
+    const lbl = document.createElement("span");
+    lbl.className = "check-data-label";
+    lbl.textContent = etiqueta;
+
+    const val = document.createElement("span");
+    val.className = "check-data-value" + (claseValor ? " " + claseValor : "");
+    val.textContent = valor !== null && valor !== undefined ? String(valor) : "—";
+
+    item.appendChild(lbl);
+    item.appendChild(val);
+    return item;
+}
+
+/**
+ * Determina la clase de color para la fuente de reloj.
+ */
+function _claseReloj(fuente) {
+    if (!fuente) return "";
+    const f = fuente.toUpperCase();
+    if (f === "GPS")  return "success";
+    if (f === "RTC")  return "warning";
+    if (f === "RPI")  return "accent";
+    return "danger"; // E3, E4, E5...
+}
+
+async function comprobarRegistro() {
+    $btnCheck.disabled = true;
+    $btnCheck.classList.add("loading");
+    $btnCheck.textContent = "Consultando...";
+
+    // Limpiar salida anterior
+    $checkOutput.replaceChildren();
+    $checkOutput.classList.add("hidden");
+
+    try {
+        const resp = await fetch("/api/check", { cache: "no-store" });
+        const data = await resp.json().catch(() => ({}));
+
+        $checkOutput.classList.remove("hidden");
+
+        if (!resp.ok || data.status === "error") {
+            // --- Mostrar error ---
+            const blk = document.createElement("div");
+            blk.className = "check-error";
+            blk.textContent = data.error ?? "Error desconocido al ejecutar el diagnóstico.";
+            $checkOutput.appendChild(blk);
+            return;
+        }
+
+        // --- Construir grid de datos ---
+        const d = data.datos ?? {};
+        const grid = document.createElement("div");
+        grid.className = "check-data-grid";
+
+        // Archivo y tamaño (fila completa)
+        grid.appendChild(_crearTarjetaDato(
+            "Nombre de archivo",
+            d.nombre_archivo,
+            "accent",
+            true
+        ));
+        grid.appendChild(_crearTarjetaDato(
+            "Tamaño del archivo (bytes)",
+            d.tamano_archivo !== null ? d.tamano_archivo.toLocaleString("es-EC") : null,
+            "accent"
+        ));
+
+        // Tiempos
+        grid.appendChild(_crearTarjetaDato("Hora sistema",  d.hora_sistema));
+        grid.appendChild(_crearTarjetaDato("Hora uC",       d.hora_uc));
+
+        // Fuente de reloj (con color semántico)
+        grid.appendChild(_crearTarjetaDato(
+            "Fuente de reloj",
+            d.fuente_reloj,
+            _claseReloj(d.fuente_reloj)
+        ));
+
+        // Aceleraciones
+        const fmtAcel = v => (v !== null && v !== undefined)
+            ? Number(v).toFixed(8) + " m/s²"
+            : "—";
+        grid.appendChild(_crearTarjetaDato("Aceleración X", fmtAcel(d.aceleracion_x), "success"));
+        grid.appendChild(_crearTarjetaDato("Aceleración Y", fmtAcel(d.aceleracion_y), "success"));
+        grid.appendChild(_crearTarjetaDato("Aceleración Z", fmtAcel(d.aceleracion_z), "success"));
+
+        // Error de reloj (si existe)
+        if (d.error_reloj) {
+            const alerta = document.createElement("div");
+            alerta.className = "check-reloj-error";
+            alerta.textContent = "⚠ " + d.error_reloj;
+            grid.appendChild(alerta);
+        }
+
+        $checkOutput.appendChild(grid);
+
+    } catch (err) {
+        console.error("Error de red al consultar /api/check.");
+        $checkOutput.classList.remove("hidden");
+        const blk = document.createElement("div");
+        blk.className = "check-error";
+        blk.textContent = "No se pudo conectar con el servidor. Comprueba la conexión.";
+        $checkOutput.appendChild(blk);
+    } finally {
+        $btnCheck.disabled = false;
+        $btnCheck.classList.remove("loading");
+        // Restaurar botón con ícono
+        $btnCheck.replaceChildren();
+        const ico = document.createElement("span");
+        ico.className = "btn-icon";
+        ico.setAttribute("aria-hidden", "true");
+        ico.textContent = "▶";
+        $btnCheck.appendChild(ico);
+        $btnCheck.appendChild(document.createTextNode(" Comprobar"));
+    }
+}
+
+// Event listener del botón Comprobar
+$btnCheck.addEventListener("click", comprobarRegistro);
 
 // Auto-capitalizar estacion_id en tiempo real
 document.getElementById("estacion_id").addEventListener("input", function () {

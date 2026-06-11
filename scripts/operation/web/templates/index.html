@@ -230,6 +230,22 @@
             </div>
         </div>
 
+        <!-- ===== SECCIÓN DE DIAGNÓSTICO (independiente del formulario) ===== -->
+        <div class="diagnostico-section" id="diagnostico-section">
+            <div class="diagnostico-header">
+                <h2 class="diagnostico-title">
+                    <span aria-hidden="true">🔍</span>
+                    Diagnóstico del Registro
+                </h2>
+                <button type="button" id="btn-check" class="btn btn-info">
+                    <span class="btn-icon" aria-hidden="true">▶</span>
+                    Comprobar
+                </button>
+            </div>
+            <!-- Contenedor de datos parseados (oculto hasta presionar Comprobar) -->
+            <div id="check-output" class="hidden" aria-live="polite"></div>
+        </div>
+
     </main>
 
     <!-- ===== PIE DE PÁGINA ===== -->
@@ -240,3 +256,4 @@
     <script src="/static/js/app.js"></script>
 </body>
 </html>
+

@@ -246,6 +246,17 @@ _PYTHON_BIN     = os.path.join(PROJECT_LOCAL_ROOT, ".venv", "bin", "python3")
 _REGISTROCONT   = "/usr/local/bin/registrocontinuo"
 _SUPERVISORCTL  = "/usr/bin/supervisorctl"
 
+# Wrapper de diagnóstico (ruta en el Git root)
+if PROJECT_GIT_ROOT:
+    _COMPROBAR_WRAPPER = os.path.join(
+        PROJECT_GIT_ROOT, "scripts", "operation", "acelerografo", "comprobar_registro_wrapper.py"
+    )
+else:
+    _COMPROBAR_WRAPPER = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "operation", "acelerografo", "comprobar_registro_wrapper.py"
+    )
+
 
 def _hidratar():
     return _ejecutar_subproceso(
@@ -266,6 +277,38 @@ def _reiniciar_mqtt():
         ["sudo", _SUPERVISORCTL, "restart", "mqtt_coordinator"],
         "Reiniciar mqtt_coordinator"
     )
+
+
+def _comprobar_registro():
+    """
+    Ejecuta el wrapper Python de diagnóstico que a su vez invoca el binario C
+    comprobar_registro y retorna su salida en formato JSON estructurado.
+    Usa un timeout corto (15s) ya que la operación es solo lectura de disco.
+    """
+    if not os.path.isfile(_COMPROBAR_WRAPPER):
+        return False, f"Wrapper no encontrado: {_COMPROBAR_WRAPPER}"
+    try:
+        resultado = subprocess.run(
+            [_PYTHON_BIN, _COMPROBAR_WRAPPER],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={**os.environ,
+                 "PROJECT_LOCAL_ROOT": PROJECT_LOCAL_ROOT,
+                 "PROJECT_GIT_ROOT": PROJECT_GIT_ROOT},
+        )
+        if resultado.returncode == 0:
+            logger.info("[CHECK] comprobar_registro ejecutado correctamente.")
+            return True, resultado.stdout
+        else:
+            logger.error("[CHECK] Error en comprobar_registro: %s", resultado.stdout[:300])
+            return False, resultado.stdout
+    except subprocess.TimeoutExpired:
+        logger.error("[CHECK] TIMEOUT al ejecutar comprobar_registro_wrapper.")
+        return False, "Timeout: el binario tardó más de 15 segundos."
+    except Exception as exc:
+        logger.error("[CHECK] EXCEPCIÓN: %s", exc)
+        return False, str(exc)
 
 
 def _estado_registro_continuo() -> bool:
@@ -414,6 +457,51 @@ def post_config():
         respuesta["advertencias"] = errores_servicios
 
     return jsonify(respuesta), 200
+
+
+@app.route("/api/check", methods=["GET"])
+def get_check():
+    """
+    Ejecuta el diagnóstico del registro continuo.
+
+    Invoca comprobar_registro_wrapper.py que a su vez corre el binario C
+    comprobar_registro y retorna la salida parseada como JSON estructurado.
+
+    Respuesta exitosa:
+        {
+            "status": "ok",
+            "datos": {
+                "hora_sistema":   "17:28:19",
+                "nombre_archivo": "DEV0_26_06_10_17.dat",
+                "tamano_archivo": 1253000,
+                "fuente_reloj":   "GPS",
+                "hora_uc":        "17:28:19",
+                "aceleracion_x":  0.00372505,
+                "aceleracion_y":  -0.00148201,
+                "aceleracion_z":  9.80145263,
+                "error_reloj":    null
+            }
+        }
+    """
+    ok, salida = _comprobar_registro()
+    if not ok:
+        # La salida puede ser JSON de error o texto plano
+        try:
+            detalle = json.loads(salida).get("error", salida[:300])
+        except Exception:
+            detalle = salida[:300]
+        return jsonify({"status": "error", "error": detalle}), 500
+
+    try:
+        datos = json.loads(salida)
+    except json.JSONDecodeError:
+        logger.error("[CHECK] Salida del wrapper no es JSON válido: %s", salida[:200])
+        return jsonify({"status": "error", "error": "Respuesta del diagnóstico inválida."}), 500
+
+    if "error" in datos:
+        return jsonify({"status": "error", "error": datos["error"]}), 500
+
+    return jsonify({"status": "ok", "datos": datos}), 200
 
 
 @app.route("/api/status", methods=["GET"])
