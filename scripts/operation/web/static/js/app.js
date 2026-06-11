@@ -454,7 +454,7 @@ async function comprobarRegistro() {
 
         // Tiempos
         grid.appendChild(_crearTarjetaDato("Hora sistema",  d.hora_sistema));
-        grid.appendChild(_crearTarjetaDato("Hora uC",       d.hora_uc));
+        grid.appendChild(_crearTarjetaDato("Hora dsPIC",    d.hora_uc));
 
         // Fuente de reloj (con color semántico)
         grid.appendChild(_crearTarjetaDato(
