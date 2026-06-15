@@ -127,7 +127,7 @@ def restrict_http_methods():
 # Validación de la configuración maestra
 # ---------------------------------------------------------------------------
 
-_ESTACION_ID_RE = re.compile(r'^[A-Z]{3}\d$')
+_ESTACION_ID_RE = re.compile(r'^[A-Z0-9]{4}$')
 _MODO_ADQUISICION_VALS = {"online", "offline"}
 _FUENTE_RELOJ_VALS     = {"0", "1"}
 _SI_NO_VALS            = {"si", "no"}
@@ -155,7 +155,7 @@ def _validar_configuracion(data: dict) -> list[str]:
     eid = data.get("estacion_id", "")
     if not isinstance(eid, str) or not _ESTACION_ID_RE.match(eid):
         errores.append(
-            f"'estacion_id' debe cumplir el formato RSA: 3 letras mayúsculas + 1 dígito (ej: NOM0). Recibido: '{eid}'"
+            f"'estacion_id' debe cumplir el formato RSA: 4 caracteres alfanuméricos en mayúsculas (ej: NOM0, ABCD). Recibido: '{eid}'"
         )
 
     # --- nombre (debe ser todo en mayúsculas) ---

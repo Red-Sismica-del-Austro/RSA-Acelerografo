@@ -149,13 +149,13 @@ function recogerPayload() {
 // ---------------------------------------------------------------------------
 // Validaciones del lado del cliente (espejo de las del backend)
 // ---------------------------------------------------------------------------
-const _ESTACION_RE = /^[A-Z]{3}\d$/;
+const _ESTACION_RE = /^[A-Z0-9]{4}$/;
 
 function validarPayload(p) {
     const errores = [];
 
     if (!_ESTACION_RE.test(p.estacion_id)) {
-        errores.push("Código de estación inválido. Debe ser 3 letras mayúsculas + 1 dígito (ej: NOM0).");
+        errores.push("Código de estación inválido. Debe ser 4 caracteres alfanuméricos en mayúsculas (ej: NOM0, ABCD).");
         marcarCampoError("estacion_id", "Formato incorrecto");
     } else {
         limpiarCampoError("estacion_id");

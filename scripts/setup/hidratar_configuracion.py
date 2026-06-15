@@ -67,9 +67,9 @@ def main():
             sys.exit(1)
 
     estacion_id = config["estacion_id"]
-    # Formato estándar RSA: 3 letras y 1 número (ej: NOM0, CHA1, DEV0)
-    if not re.match(r'^[A-Z]{3}\d$', estacion_id):
-        print(f"Advertencia: El 'estacion_id' ({estacion_id}) no cumple con el formato estándar RSA de 3 letras y 1 número (ej: NOM0).")
+    # Formato estándar RSA: 4 caracteres alfanuméricos en mayúsculas (ej: NOM0, ABCD)
+    if not re.match(r'^[A-Z0-9]{4}$', estacion_id):
+        print(f"Advertencia: El 'estacion_id' ({estacion_id}) no cumple con el formato estándar RSA de 4 caracteres alfanuméricos en mayúsculas (ej: NOM0).")
 
     # 3. Definir plantillas y archivos destino
     mappings = {
