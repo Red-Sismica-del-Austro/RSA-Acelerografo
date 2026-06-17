@@ -158,3 +158,29 @@ class StructuredLogger:
     def mqtt_error(self, operation: str, error: str):
         """[MQTT_ERROR] Error en operación MQTT"""
         self._log_structured("SUMMARY", "MQTT_ERROR", operation, {"error": error})
+
+    # --- Métodos específicos para Streaming y Ring Buffer ---
+
+    def ring_write(self, filename: str, frame_count: int):
+        """[RING_WRITE] Trama escrita al ring buffer"""
+        self._log_structured("DEBUG", "RING_WRITE", filename, {"frames": frame_count})
+
+    def ring_rotate(self, old_file: str, new_file: str):
+        """[RING_ROTATE] Rotación de archivo del ring buffer"""
+        self._log_structured("INFO", "RING_ROTATE", old_file, {"new": new_file})
+
+    def ring_cleanup(self, deleted_count: int, freed_mb: float):
+        """[RING_CLEANUP] Limpieza por política de retención"""
+        self._log_structured("SUMMARY", "RING_CLEANUP", None, {"deleted": deleted_count, "freed_mb": f"{freed_mb:.1f}"})
+
+    def ring_query(self, start: str, end: str, frames_found: int):
+        """[RING_QUERY] Consulta al ring buffer"""
+        self._log_structured("INFO", "RING_QUERY", None, {"start": start, "end": end, "frames": frames_found})
+
+    def pipe_read(self, status: str, details: str = None):
+        """[PIPE_READ] Estado de lectura del named pipe"""
+        self._log_structured("DEBUG", "PIPE_READ", None, {"status": status, "details": details})
+
+    def pipe_error(self, error: str):
+        """[PIPE_ERROR] Error en lectura del named pipe"""
+        self._log_structured("SUMMARY", "PIPE_ERROR", None, {"error": error})

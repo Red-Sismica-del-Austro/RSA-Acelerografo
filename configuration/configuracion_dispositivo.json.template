@@ -40,5 +40,13 @@
                 "retener_dias": {"continuous": 7}
             }
         }
+    },
+    "streaming": {
+        "habilitado": true,
+        "ring_buffer": {
+            "directorio": "/home/rsa/data/ring-buffer/",
+            "max_size_mb": 500,
+            "archivo_duracion_min": 5
+        }
     }
 }

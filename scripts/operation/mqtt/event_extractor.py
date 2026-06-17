@@ -12,6 +12,9 @@ import os
 import re
 import sys
 import subprocess
+import json
+import shutil
+from datetime import datetime, timedelta
 from typing import Optional
 
 
@@ -73,7 +76,217 @@ def _parsear_archivo_generado(stdout: str) -> Optional[str]:
         match = re.search(r'Archivo:\s+(.+\.mseed)', linea)
         if match:
             return os.path.basename(match.group(1).strip())
-    return None
+        return None
+
+
+# ============================================================================
+# EXTRACTOR DESDE RING BUFFER
+# ============================================================================
+
+def _leer_config_dispositivo(project_local_root: str) -> Optional[dict]:
+    config_path = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
+    try:
+        with open(config_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _obtener_codigo_estacion(project_local_root: str) -> str:
+    config_mseed_file = os.path.join(project_local_root, "configuracion", "configuracion_mseed.json")
+    try:
+        with open(config_mseed_file, "r") as f:
+            config = json.load(f)
+        return config.get("CODIGO(1)", "Unknown")
+    except Exception:
+        return "Unknown"
+
+
+def _intentar_extraer_desde_ring_buffer(
+    start_str: str,
+    duration: float,
+    logger
+) -> Optional[str]:
+    """
+    Intenta extraer un segmento desde el ring buffer en disco.
+
+    Returns:
+        Ruta absoluta del archivo .mseed generado en el directorio de eventos extraídos,
+        o None si falla o si el rango no está disponible en el ring buffer.
+    """
+    def _log(level: str, msg: str):
+        if logger:
+            getattr(logger, level)(msg)
+
+    # 1. Obtener PROJECT_LOCAL_ROOT
+    project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
+    if not project_local_root:
+        _log("error", "[EVENT_EXTRACTOR] PROJECT_LOCAL_ROOT no definida al consultar ring buffer")
+        return None
+
+    # 2. Leer configuracion_dispositivo.json
+    config = _leer_config_dispositivo(project_local_root)
+    if not config:
+        _log("error", "[EVENT_EXTRACTOR] No se pudo leer configuracion_dispositivo.json para ring buffer")
+        return None
+
+    # 3. Validar si el streaming está habilitado
+    streaming_config = config.get("streaming", {})
+    if not streaming_config.get("habilitado", False):
+        _log("info", "[EVENT_EXTRACTOR] Streaming no habilitado en configuración; omitiendo ring buffer")
+        return None
+
+    ring_config = streaming_config.get("ring_buffer", {})
+    dir_ring = ring_config.get("directorio", "/home/rsa/data/ring-buffer/")
+    max_size_mb = ring_config.get("max_size_mb", 500)
+    archivo_duracion_s = ring_config.get("archivo_duracion_min", 5) * 60
+
+    # 4. Parsear start_str a datetime
+    time_str = start_str.replace('Z', ' ')
+    try:
+        start_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        try:
+            start_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError as e:
+            _log("error", f"[EVENT_EXTRACTOR] Formato de start time inválido '{start_str}': {e}")
+            return None
+
+    end_dt = start_dt + timedelta(seconds=duration)
+
+    # 5. Instanciar RingBufferStore en modo lectura
+    operation_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if operation_dir not in sys.path:
+        sys.path.insert(0, operation_dir)
+
+    try:
+        from streaming.ring_buffer_store import RingBufferStore
+    except ImportError as e:
+        _log("error", f"[EVENT_EXTRACTOR] No se pudo importar RingBufferStore: {e}")
+        return None
+
+    _log("info", f"[EVENT_EXTRACTOR] Abriendo RingBufferStore en {dir_ring} para verificar rango [{start_dt} a {end_dt}]")
+    try:
+        store = RingBufferStore(
+            directorio=dir_ring,
+            max_size_mb=max_size_mb,
+            archivo_duracion_s=archivo_duracion_s,
+            usar_fecha_filename=True
+        )
+    except Exception as e:
+        _log("error", f"[EVENT_EXTRACTOR] Falló instanciar RingBufferStore: {e}")
+        return None
+
+    try:
+        # Verificar si el rango está disponible
+        time_range = store.get_time_range()
+        if not time_range:
+            _log("info", "[EVENT_EXTRACTOR] Ring buffer vacío; recurriendo a archivos mseed horarios")
+            store.close()
+            return None
+
+        oldest_ts, newest_ts = time_range
+        # Añadimos un pequeño margen por el jitter de las tramas
+        if start_dt < oldest_ts or end_dt > newest_ts:
+            _log("info", f"[EVENT_EXTRACTOR] Rango solicitado [{start_dt} a {end_dt}] fuera de la cobertura del ring buffer [{oldest_ts} a {newest_ts}]")
+            store.close()
+            return None
+
+        # Extraer tramas crudas
+        _log("info", f"[EVENT_EXTRACTOR] Rango disponible en ring buffer. Consultando tramas...")
+        raw_frames = store.query_raw(start_dt, end_dt)
+        store.close()
+
+        if not raw_frames:
+            _log("info", "[EVENT_EXTRACTOR] No se encontraron tramas en la consulta del ring buffer")
+            return None
+
+        _log("info", f"[EVENT_EXTRACTOR] Se obtuvieron {len(raw_frames)} tramas del ring buffer. Escribiendo archivo binario temporal...")
+
+        # 6. Determinar directorios y nombres de archivos
+        codigo_estacion = _obtener_codigo_estacion(project_local_root)
+        path_eventos_extraidos = config.get("directorios", {}).get("eventos_extraidos", "")
+        path_archivos_mseed = config.get("directorios", {}).get("archivos_mseed", "")
+
+        if not path_eventos_extraidos or not path_archivos_mseed:
+            _log("error", "[EVENT_EXTRACTOR] Directorios de configuración vacíos en configuracion_dispositivo.json")
+            return None
+
+        # Nombre de archivo temporal que cumple con el patrón CODIGO_AAMMDD-HHMMSS.dat
+        temp_bin_name = f"{codigo_estacion}_{start_dt.strftime('%y%m%d-%H%M%S')}.dat"
+        temp_bin_path = os.path.join(path_eventos_extraidos, temp_bin_name)
+
+        # Escribir tramas al archivo temporal
+        os.makedirs(path_eventos_extraidos, exist_ok=True)
+        with open(temp_bin_path, "wb") as f:
+            for frame in raw_frames:
+                f.write(frame)
+
+        _log("info", f"[EVENT_EXTRACTOR] Archivo binario temporal creado en {temp_bin_path}. Convirtiendo a miniSEED...")
+
+        # 7. Ejecutar binary_to_mseed.py modo 3 (--file) sobre el archivo temporal
+        binary_to_mseed_script = os.path.join(operation_dir, "mseed", "binary_to_mseed.py")
+        venv_python = os.path.join(project_local_root, ".venv", "bin", "python3")
+
+        if not os.path.exists(venv_python):
+            _log("error", f"[EVENT_EXTRACTOR] No se encontró el Python del venv en {venv_python}")
+            try:
+                os.remove(temp_bin_path)
+            except OSError:
+                pass
+            return None
+
+        cmd_convert = [
+            venv_python,
+            binary_to_mseed_script,
+            "--file", temp_bin_path
+        ]
+
+        _log("info", f"[EVENT_EXTRACTOR] Ejecutando: {' '.join(cmd_convert)}")
+        resultado_conversion = subprocess.run(
+            cmd_convert,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+
+        # Borrar el archivo temporal binario .dat de inmediato
+        try:
+            os.remove(temp_bin_path)
+            _log("debug", f"[EVENT_EXTRACTOR] Archivo binario temporal {temp_bin_path} eliminado")
+        except Exception as e:
+            _log("warning", f"[EVENT_EXTRACTOR] No se pudo eliminar archivo binario temporal {temp_bin_path}: {e}")
+
+        if resultado_conversion.returncode != 0:
+            _log("error", f"[EVENT_EXTRACTOR] binary_to_mseed.py falló (código {resultado_conversion.returncode}): {resultado_conversion.stderr}")
+            return None
+
+        # Parsear stdout de binary_to_mseed.py para obtener la ruta del mseed generado
+        mseed_generado_path = None
+        for line in resultado_conversion.stdout.splitlines():
+            match = re.search(r'output\s*:\s*(.+\.mseed)', line)
+            if match:
+                mseed_generado_path = match.group(1).strip()
+                break
+
+        if not mseed_generado_path or not os.path.exists(mseed_generado_path):
+            _log("error", f"[EVENT_EXTRACTOR] No se pudo determinar el archivo mseed generado o el archivo no existe. stdout: {resultado_conversion.stdout}")
+            return None
+
+        # 8. Mover el archivo .mseed generado a la carpeta de eventos extraídos
+        mseed_filename = os.path.basename(mseed_generado_path)
+        mseed_destino_path = os.path.join(path_eventos_extraidos, mseed_filename)
+
+        _log("info", f"[EVENT_EXTRACTOR] Moviendo {mseed_generado_path} a {mseed_destino_path}")
+        shutil.move(mseed_generado_path, mseed_destino_path)
+
+        return mseed_destino_path
+
+    except Exception as e:
+        _log("error", f"[EVENT_EXTRACTOR] Error durante extracción desde ring buffer: {e}")
+        import traceback
+        _log("error", traceback.format_exc())
+        return None
 
 
 # ============================================================================
@@ -118,6 +331,9 @@ def extraer_y_subir_evento(
     # ------------------------------------------------------------------
     # Resolver rutas
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Resolver rutas
+    # ------------------------------------------------------------------
     try:
         rutas = _resolver_rutas()
     except (EnvironmentError, FileNotFoundError) as e:
@@ -127,77 +343,94 @@ def extraer_y_subir_evento(
             "output_file": None,
             "uploaded": False,
             "phase": "pipeline",
+            "source": "mseed_archive",
             "message": str(e)
         }
 
     # ------------------------------------------------------------------
-    # Fase 1: Extracción
+    # Fase 0: Intentar extracción desde ring buffer (más rápida)
     # ------------------------------------------------------------------
-    _log("info", f"[EVENT_EXTRACTOR] Iniciando extracción → start={start}, duration={duration}s")
+    ring_result_path = _intentar_extraer_desde_ring_buffer(start, duration, logger)
+    source = "mseed_archive"  # Por defecto fallback
+    output_file = None
 
-    cmd_extract = [
-        rutas["venv_python"],
-        rutas["extract_script"],
-        "--start", start,
-        "--duration", str(duration)
-    ]
+    if ring_result_path is not None:
+        output_file = os.path.basename(ring_result_path)
+        source = "ring_buffer"
+        _log("info", f"[EVENT_EXTRACTOR] Extracción desde ring buffer exitosa → {output_file}")
+    else:
+        # ------------------------------------------------------------------
+        # Fase 1: Extracción tradicional
+        # ------------------------------------------------------------------
+        _log("info", f"[EVENT_EXTRACTOR] Iniciando extracción desde mseed horarios → start={start}, duration={duration}s")
 
-    try:
-        resultado_extraccion = subprocess.run(
-            cmd_extract,
-            capture_output=True,
-            text=True,
-            timeout=180  # 3 minutos máximo
-        )
-    except subprocess.TimeoutExpired:
-        msg = "Timeout durante la extracción del segmento (>180s)"
-        _log("error", f"[EVENT_EXTRACTOR] {msg}")
-        return {
-            "status": "error",
-            "output_file": None,
-            "uploaded": False,
-            "phase": "extraction",
-            "message": msg
-        }
-    except Exception as e:
-        msg = f"Error inesperado al ejecutar extract_segment.py: {e}"
-        _log("error", f"[EVENT_EXTRACTOR] {msg}")
-        return {
-            "status": "error",
-            "output_file": None,
-            "uploaded": False,
-            "phase": "extraction",
-            "message": msg
-        }
+        cmd_extract = [
+            rutas["venv_python"],
+            rutas["extract_script"],
+            "--start", start,
+            "--duration", str(duration)
+        ]
 
-    # Verificar código de retorno
-    if resultado_extraccion.returncode != 0:
-        stderr_msg = resultado_extraccion.stderr.strip().splitlines()[-1] if resultado_extraccion.stderr else "sin detalle"
-        msg = f"extract_segment.py falló (código {resultado_extraccion.returncode}): {stderr_msg}"
-        _log("error", f"[EVENT_EXTRACTOR] {msg}")
-        return {
-            "status": "error",
-            "output_file": None,
-            "uploaded": False,
-            "phase": "extraction",
-            "message": msg
-        }
+        try:
+            resultado_extraccion = subprocess.run(
+                cmd_extract,
+                capture_output=True,
+                text=True,
+                timeout=180  # 3 minutos máximo
+            )
+        except subprocess.TimeoutExpired:
+            msg = "Timeout durante la extracción del segmento (>180s)"
+            _log("error", f"[EVENT_EXTRACTOR] {msg}")
+            return {
+                "status": "error",
+                "output_file": None,
+                "uploaded": False,
+                "phase": "extraction",
+                "source": "mseed_archive",
+                "message": msg
+            }
+        except Exception as e:
+            msg = f"Error inesperado al ejecutar extract_segment.py: {e}"
+            _log("error", f"[EVENT_EXTRACTOR] {msg}")
+            return {
+                "status": "error",
+                "output_file": None,
+                "uploaded": False,
+                "phase": "extraction",
+                "source": "mseed_archive",
+                "message": msg
+            }
 
-    # Obtener nombre del archivo generado
-    output_file = _parsear_archivo_generado(resultado_extraccion.stdout)
-    if not output_file:
-        msg = "No se pudo determinar el nombre del archivo extraído desde el stdout"
-        _log("error", f"[EVENT_EXTRACTOR] {msg}")
-        _log("error", f"[EVENT_EXTRACTOR] stdout completo: {resultado_extraccion.stdout}")
-        return {
-            "status": "error",
-            "output_file": None,
-            "uploaded": False,
-            "phase": "extraction",
-            "message": msg
-        }
+        # Verificar código de retorno
+        if resultado_extraccion.returncode != 0:
+            stderr_msg = resultado_extraccion.stderr.strip().splitlines()[-1] if resultado_extraccion.stderr else "sin detalle"
+            msg = f"extract_segment.py falló (código {resultado_extraccion.returncode}): {stderr_msg}"
+            _log("error", f"[EVENT_EXTRACTOR] {msg}")
+            return {
+                "status": "error",
+                "output_file": None,
+                "uploaded": False,
+                "phase": "extraction",
+                "source": "mseed_archive",
+                "message": msg
+            }
 
-    _log("info", f"[EVENT_EXTRACTOR] Extracción exitosa → archivo: {output_file}")
+        # Obtener nombre del archivo generado
+        output_file = _parsear_archivo_generado(resultado_extraccion.stdout)
+        if not output_file:
+            msg = "No se pudo determinar el nombre del archivo extraído desde el stdout"
+            _log("error", f"[EVENT_EXTRACTOR] {msg}")
+            _log("error", f"[EVENT_EXTRACTOR] stdout completo: {resultado_extraccion.stdout}")
+            return {
+                "status": "error",
+                "output_file": None,
+                "uploaded": False,
+                "phase": "extraction",
+                "source": "mseed_archive",
+                "message": msg
+            }
+
+        _log("info", f"[EVENT_EXTRACTOR] Extracción exitosa → archivo: {output_file}")
 
     # ------------------------------------------------------------------
     # Fase 2: Subida a Drive (opcional)
@@ -230,6 +463,7 @@ def extraer_y_subir_evento(
                 "output_file": output_file,
                 "uploaded": False,
                 "phase": "upload",
+                "source": source,
                 "message": msg
             }
         except Exception as e:
@@ -240,6 +474,7 @@ def extraer_y_subir_evento(
                 "output_file": output_file,
                 "uploaded": False,
                 "phase": "upload",
+                "source": source,
                 "message": msg
             }
 
@@ -252,6 +487,7 @@ def extraer_y_subir_evento(
                 "output_file": output_file,
                 "uploaded": False,
                 "phase": "upload",
+                "source": source,
                 "message": msg
             }
 
@@ -272,5 +508,6 @@ def extraer_y_subir_evento(
         "output_file": output_file,
         "uploaded": uploaded,
         "phase": None,
+        "source": source,
         "message": "; ".join(msg_partes)
     }
