@@ -273,8 +273,17 @@ class StreamProcessor:
                 f"¿Está corriendo registro_continuo?"
             )
 
-        self._fd = os.open(self._pipe_path, os.O_RDWR | os.O_NONBLOCK)
-        self._logger.info(f"[PIPE_OPEN] Pipe abierto: {self._pipe_path} (fd={self._fd}, O_RDWR|O_NONBLOCK)")
+        try:
+            self._fd = os.open(self._pipe_path, os.O_RDWR | os.O_NONBLOCK)
+            self._logger.info(f"[PIPE_OPEN] Pipe abierto: {self._pipe_path} (fd={self._fd}, O_RDWR|O_NONBLOCK)")
+        except PermissionError as e:
+            self._logger.error(
+                f"[PIPE_PERMISSION_ERROR] Error de permisos al abrir {self._pipe_path}: {e}. "
+                f"Asegúrese de que el usuario actual tenga permisos de lectura/escritura en el pipe. "
+                f"Puede solucionar esto ejecutando: sudo chmod 666 {self._pipe_path}"
+            )
+            raise
+
 
     def _cerrar_pipe(self) -> None:
         """Cierra el file descriptor del pipe de forma segura."""

@@ -100,6 +100,13 @@ update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mqtt/" "$PROJECT_LO
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/mseed/" "$PROJECT_LOCAL_ROOT/scripts/mseed/"
 update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/drive/" "$PROJECT_LOCAL_ROOT/scripts/drive/"
 
+# Actualizar nuevos módulos core y streaming
+mkdir -p "$PROJECT_LOCAL_ROOT/scripts/core"
+update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/core/" "$PROJECT_LOCAL_ROOT/scripts/core/"
+
+mkdir -p "$PROJECT_LOCAL_ROOT/scripts/streaming"
+update_files_if_changed "$PROJECT_GIT_ROOT/scripts/operation/streaming/" "$PROJECT_LOCAL_ROOT/scripts/streaming/"
+
 # Actualizar servidor web de configuración (se copia siempre para reflejar cambios en templates/static)
 echo "Actualizando servidor web..."
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/web
@@ -110,6 +117,7 @@ if [ -f "$PROJECT_GIT_ROOT/scripts/operation/structured_logger.py" ]; then
     cp "$PROJECT_GIT_ROOT/scripts/operation/structured_logger.py" "$PROJECT_LOCAL_ROOT/scripts/structured_logger.py"
     echo "Actualizando: $PROJECT_LOCAL_ROOT/scripts/structured_logger.py"
 fi
+
 
 # Revisar y actualizar task-scripts en /usr/local/bin
 update_task_scripts "$PROJECT_GIT_ROOT/scripts/task/"
@@ -159,7 +167,24 @@ function update_supervisor_config {
     else
         echo "No se detectaron cambios en la configuración de Supervisor (config_server)."
     fi
+
+    # --- stream_processor ---
+    local src_stream="$PROJECT_GIT_ROOT/scripts/task/stream_processor.conf"
+    local temp_stream="$PROJECT_LOCAL_ROOT/tmp-files/stream_processor.conf.tmp"
+    local dest_stream="/etc/supervisor/conf.d/stream_processor.conf"
+
+    sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" "$src_stream" > "$temp_stream"
+
+    if [ ! -f "$dest_stream" ] || ! cmp -s "$temp_stream" "$dest_stream"; then
+        echo "Actualizando configuración de Supervisor: $dest_stream"
+        sudo cp "$temp_stream" "$dest_stream"
+        sudo supervisorctl reread
+        sudo supervisorctl update
+    else
+        echo "No se detectaron cambios en la configuración de Supervisor (stream_processor)."
+    fi
 }
+
 
 # Llamar a la función
 update_supervisor_config
