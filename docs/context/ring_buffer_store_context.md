@@ -3,14 +3,14 @@ proyecto: RSA-Acelerografo
 tipo: contexto_tecnico
 archivo: scripts/operation/streaming/ring_buffer_store.py
 temas: [acelerografo, streaming, telemetria]
-generado: 2026-06-17
+generado: 2026-06-18
 ---
 # ring_buffer_store.py — Contexto para Agentes IA
 
 > Almacén de tramas binarias en disco con rotación FIFO y consulta por rangos de tiempo.
 
 **Ruta**: `scripts/operation/streaming/ring_buffer_store.py`  
-**LOC**: 613 | **Lenguaje**: Python | **Dependencias**: `numpy`, `datetime`, `os`, `glob`, `threading`, `core.frame_decoder`  
+**LOC**: 651 | **Lenguaje**: Python | **Dependencias**: `numpy`, `datetime`, `os`, `glob`, `threading`, `time`, `core.frame_decoder`  
 **Proceso**: Instanciado por el daemon de adquisición continua (`stream_processor.py`) para registrar tramas y consultado por agentes de telemetría/extracción (`event_extractor.py`) para recuperar datos.
 
 ---
@@ -73,18 +73,24 @@ El acceso a esta estructura y a los descriptores de archivos de escritura está 
 
 - **Directorio de Almacenamiento**: Configurado en `/home/rsa/data/ring-buffer/`.
 - **Estructura del archivo**: Cada archivo `.bin` es una concatenación cruda de tramas de 2506 bytes, sin metadatos ni headers de contenedor (permitiendo la lectura directa mediante `binary_to_mseed.py`).
-- **Nomenclatura**: `ring_YYYYMMDD_HHMMSS.bin`, donde la fecha y hora corresponden al timestamp de la primera trama escrita en dicho archivo.
+- **Nomenclatura**: `ring_YYYYMMDD_HHMMSS.bin`, donde la fecha y hora corresponden al timestamp de la primera trama escrita en dicho archivo (o al tiempo real UTC en caso de correcciones de reloj, ver sección de Rotación).
 
 ---
 
 ## Políticas del Búfer Circular
 
 ### 1. Rotación de Archivos
-Un archivo se cierra y se abre uno nuevo bajo dos condiciones:
+Un archivo se cierra y se abre uno nuevo bajo tres condiciones evaluadas en `_debe_rotar()`:
 *   Al recibir la primera trama de una ejecución (si no hay descriptor activo).
-*   Cuando la diferencia temporal entre la trama entrante y el tiempo de inicio del archivo activo supera la duración configurada (`archivo_duracion_s`, por defecto 300 segundos = 5 minutos).
+*   **Tiempo Monótono (Criterio Primario)**: Cuando el tiempo de reloj del host transcurrido desde la creación del archivo actual (`time.monotonic() - self._archivo_activo_inicio_mono`) supera la duración configurada (`archivo_duracion_s`, por defecto 300 segundos = 5 minutos). Este criterio asegura robustez e inmunidad frente a desvíos o saltos de reloj en los timestamps de los datos.
+*   **Regresión Temporal (Criterio Secundario)**: Si el timestamp de la trama entrante es anterior al tiempo de inicio del archivo activo (`timestamp < self._archivo_activo_inicio`) y el tiempo monótono real transcurrido supera el 90% de la duración del archivo. Esto detecta desfases y previene el bloqueo de la rotación cuando el reloj de datos se desfasa.
 
-### 2. Retención FIFO por Espacio
+### 2. Mitigación del Bug del dsPIC (Cruce de Medianoche)
+Durante el cruce de medianoche, el hardware dsPIC puede enviar tramas con la hora actualizada a `00:00:xx` pero manteniendo erróneamente la fecha del día anterior (por ejemplo, `17` de junio en lugar de `18` de junio). 
+*   **Rotación**: Sin la mitigación, la resta de timestamps (`00:00:01 - 23:59:44`) daría un delta negativo de `-86383` segundos, impidiendo que el archivo rotara y causando que creciera de forma desmedida (reportado en producción hasta 148 MB en lugar de los 1.2 MB esperados). Al utilizar `time.monotonic()` como criterio primario, la rotación ocurre exactamente al pasar el tiempo real programado (5 min), sin importar el retroceso del timestamp de datos.
+*   **Nomenclatura de Archivo**: En `_rotate_file()`, si la diferencia de fecha entre el reloj real UTC del sistema y la trama entrante es exactamente de 1 día (`diff_dias == 1`), el nombre del archivo se genera usando la hora del sistema UTC (`utcnow()`) en lugar de usar la trama retrasada. Esto previene que se sobrescriban o extiendan archivos del día anterior y garantiza nombres coherentes cronológicamente.
+
+### 3. Retención FIFO por Espacio
 Cuando el espacio total de los archivos indexados supera el límite configurado (`max_size_mb`):
 1.  Se identifica el archivo más antiguo (posición `0` del índice).
 2.  Se verifica que no corresponda al archivo que actualmente se está escribiendo (nunca se elimina el archivo activo).
@@ -106,6 +112,14 @@ Cuando el espacio total de los archivos indexados supera el límite configurado 
 
 ---
 
+## Pruebas y Validación de Robustez
+
+El comportamiento del almacén se verifica completamente mediante pruebas unitarias en `scripts/operation/streaming/test_ring_buffer_store.py`. Entre los escenarios clave probados se incluyen:
+*   `test_rotacion_bug_cambio_dia`: Simula exactamente el bug del dsPIC con una trama de inicio a las 23:59:44 y una trama subsiguiente a las 00:00:01 del mismo día nominal (causando una regresión de timestamps). El test verifica que la rotación se activa por tiempo monótono transcurrido real (`time.sleep(1.1)`) y que se crean al menos 2 archivos distintos.
+
+---
+
 ## Limitaciones Conocidas / TODOs
 
 - **Búsqueda secuencial interna**: Durante las consultas (`query_raw`), el script abre cada archivo relevante y lee trama por trama de forma secuencial. Aunque el índice reduce drásticamente el espacio de búsqueda a unos pocos archivos, si el rango de consulta es muy grande (varias horas), el proceso de lectura secuencial puede ser pesado en I/O.
+- **Dependencia de la persistencia del proceso**: El cálculo del tiempo monótono del host (`time.monotonic()`) es relativo a la sesión del sistema operativo. Si bien el reinicio del daemon o del sistema operativo inicializa de nuevo la variable (lo que provoca una rotación limpia del archivo activo al iniciar), la persistencia depende de que no haya múltiples instancias del daemon escribiendo concurrentemente en el mismo directorio.
