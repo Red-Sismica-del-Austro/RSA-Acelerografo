@@ -35,6 +35,7 @@ Compatibilidad:
 
 import os
 import glob
+import time
 import threading
 import datetime
 import logging
@@ -131,6 +132,7 @@ class RingBufferStore:
         self._archivo_activo: Optional[object] = None   # file handle
         self._archivo_activo_path: Optional[str] = None
         self._archivo_activo_inicio: Optional[datetime.datetime] = None
+        self._archivo_activo_inicio_mono: Optional[float] = None  # time.monotonic() al abrir
         self._archivo_activo_frame_count: int = 0
 
         # Índice en memoria (lista ordenada por start_time)
@@ -333,14 +335,40 @@ class RingBufferStore:
 
         Retorna True si:
         - No hay archivo activo (primera escritura), o
-        - El tiempo transcurrido desde el inicio del archivo supera archivo_duracion_s.
+        - El tiempo real transcurrido desde la apertura supera archivo_duracion_s
+          (criterio primario — inmune al bug de fecha del dsPIC en cambio de día), o
+        - El timestamp de la trama retrocede respecto al inicio del archivo
+          (regresión temporal: indica cruce de día con fecha aún en el día anterior).
+
+        NOTA: Se usa time.monotonic() como criterio primario de rotación en lugar
+        del delta entre timestamps de tramas. Esto evita que un timestamp negativo
+        (causado por el bug del dsPIC al cruzar medianoche, donde la fecha del día
+        sigue siendo la del día anterior mientras la hora ya es 00:00:xx) bloquee
+        indefinidamente la rotación.
         """
         if self._archivo_activo is None:
             return True
-        if self._archivo_activo_inicio is None:
+        if self._archivo_activo_inicio is None or self._archivo_activo_inicio_mono is None:
             return True
-        delta = (timestamp - self._archivo_activo_inicio).total_seconds()
-        return delta >= self._archivo_duracion_s
+
+        # Criterio 1 (primario): tiempo real transcurrido desde apertura del archivo.
+        # Inmune al bug de fecha del dsPIC porque no depende de los timestamps de tramas.
+        tiempo_real_s = time.monotonic() - self._archivo_activo_inicio_mono
+        if tiempo_real_s >= self._archivo_duracion_s:
+            return True
+
+        # Criterio 2: regresión temporal explícita.
+        # Si el timestamp de la trama es anterior al inicio del archivo activo,
+        # significa que hay un problema de fecha (ej. cambio de día con dsPIC aún
+        # reportando el día anterior), pero la hora ya avanzó más allá de la duración.
+        # En ese caso, verificar también por delta de timestamps como señal secundaria
+        # para no rotar innecesariamente ante timestamps idénticos al inicio.
+        delta_ts = (timestamp - self._archivo_activo_inicio).total_seconds()
+        if delta_ts < 0 and tiempo_real_s >= self._archivo_duracion_s * 0.9:
+            # Regresión + tiempo real casi cumplido → rotar
+            return True
+
+        return False
 
     def _rotate_file(self, timestamp: datetime.datetime) -> None:
         """
@@ -353,8 +381,16 @@ class RingBufferStore:
         old_path = self._archivo_activo_path
         self._cerrar_archivo_activo()
 
-        # Generar nombre del nuevo archivo
-        ts_str = timestamp.strftime("%Y%m%d_%H%M%S")
+        # Generar nombre del nuevo archivo.
+        # Corrección por bug dsPIC en cambio de día: si el timestamp de la trama
+        # tiene exactamente 1 día de atraso respecto al reloj UTC del sistema
+        # (cruce de medianoche donde dsPIC aún reporta el día anterior),
+        # se usa utcnow() para que el nombre del archivo refleje la fecha real.
+        # Para discrepancias mayores (datos históricos, tests) se usa el timestamp.
+        ahora_utc = datetime.datetime.utcnow()
+        diff_dias = (ahora_utc.date() - timestamp.date()).days
+        ts_nombre = ahora_utc if diff_dias == 1 else timestamp
+        ts_str = ts_nombre.strftime("%Y%m%d_%H%M%S")
         nombre = f"ring_{ts_str}.bin"
         nuevo_path = os.path.join(self._directorio, nombre)
 
@@ -362,6 +398,7 @@ class RingBufferStore:
         self._archivo_activo = open(nuevo_path, "wb")
         self._archivo_activo_path = nuevo_path
         self._archivo_activo_inicio = timestamp
+        self._archivo_activo_inicio_mono = time.monotonic()
         self._archivo_activo_frame_count = 0
 
         # Agregar al índice
@@ -392,6 +429,7 @@ class RingBufferStore:
                 self._archivo_activo = None
                 self._archivo_activo_path = None
                 self._archivo_activo_inicio = None
+                self._archivo_activo_inicio_mono = None
 
     def _enforce_retention(self) -> None:
         """

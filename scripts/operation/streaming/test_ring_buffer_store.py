@@ -241,15 +241,21 @@ def test_query_retorna_framedata():
 # ---------------------------------------------------------------------------
 
 def test_rotacion_crea_nuevo_archivo():
-    """El ring buffer rota el archivo cuando se supera archivo_duracion_s."""
+    """El ring buffer rota el archivo cuando se supera archivo_duracion_s (tiempo real)."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Duración muy corta: 2 segundos por archivo
-        store = _make_store(tmpdir, archivo_duracion_s=2)
+        # Duración muy corta: 1 segundo por archivo (mínimo praáctico en tiempo real)
+        store = _make_store(tmpdir, archivo_duracion_s=1)
 
-        # Escribir 3 tramas con timestamps en segundos 0, 1, 2
-        # La trama del segundo 2 debería forzar una nueva rotación
+        # Primera trama: abre el primer archivo
         store.write_frame(_make_frame(hour=14, minute=30, second=0), _ts(minute=30, second=0))
+
+        # Esperar a que el tiempo real supere archivo_duracion_s=1s
+        time.sleep(1.1)
+
+        # Segunda trama: debe disparar la rotación (tiempo real >= 1s)
         store.write_frame(_make_frame(hour=14, minute=30, second=1), _ts(minute=30, second=1))
+
+        # Tercera trama: va al nuevo archivo
         store.write_frame(_make_frame(hour=14, minute=30, second=2), _ts(minute=30, second=2))
         store.close()
 
@@ -279,15 +285,17 @@ def test_naming_archivos_ring():
 def test_query_abarca_multiples_archivos():
     """query_raw() recupera tramas de múltiples archivos rotativos."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = _make_store(tmpdir, archivo_duracion_s=2)
+        store = _make_store(tmpdir, archivo_duracion_s=1)
 
         tramas_escritas = []
-        # 4 tramas, segunda=0,1,2,3 → forzará al menos 2 archivos
+        # 4 tramas separadas por sleep para forzar rotación real
         for s in range(4):
             ts = _ts(hour=14, minute=30, second=s)
             raw = _make_frame(hour=14, minute=30, second=s, x=s * 10)
             store.write_frame(raw, ts)
             tramas_escritas.append(raw)
+            if s < 3:
+                time.sleep(1.1)  # Forzar rotación por tiempo real
 
         results = store.query_raw(
             start=_ts(hour=14, minute=30, second=0),
@@ -295,6 +303,44 @@ def test_query_abarca_multiples_archivos():
         )
         _assert_eq(len(results), 4, "4 tramas de múltiples archivos")
         store.close()
+
+
+def test_rotacion_bug_cambio_dia():
+    """Regresón temporal en cambio de día (bug dsPIC) no bloquea la rotación."""
+    # Simula el escenario real:
+    # - El archivo se crea a las 23:59:44 del día 17
+    # - Las tramas de las 00:00:xx llegan con fecha del día 17 (bug dsPIC)
+    # - El timestamp retrocede, pero el tiempo real supera archivo_duracion_s
+    # - Con el fix: _debe_rotar() detecta por tiempo real y rota correctamente
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = _make_store(tmpdir, archivo_duracion_s=1)
+
+        # Trama inicial: 23:59:44 del día 17 (abre el archivo)
+        ts_inicio = datetime.datetime(2026, 6, 17, 23, 59, 44)
+        store.write_frame(
+            build_test_frame(year=2026, month=6, day=17, hour=23, minute=59, second=44),
+            ts_inicio
+        )
+
+        # Esperar a que el tiempo real supere archivo_duracion_s=1s
+        time.sleep(1.1)
+
+        # Trama con regresión temporal: 00:00:01 pero fecha del día 17 (bug dsPIC)
+        # delta_ts = datetime(17, 00:00:01) - datetime(17, 23:59:44) = -86383s (negativo)
+        ts_regresion = datetime.datetime(2026, 6, 17, 0, 0, 1)  # Fecha incorrecta del dsPIC
+        store.write_frame(
+            build_test_frame(year=2026, month=6, day=17, hour=0, minute=0, second=1),
+            ts_regresion
+        )
+        store.close()
+
+        archivos = sorted(
+            f for f in os.listdir(tmpdir) if f.endswith('.bin')
+        )
+        assert len(archivos) >= 2, (
+            f"Bug de cambio de día: deben existir al menos 2 archivos tras rotación, "
+            f"encontrados: {archivos}. El archivo se bloqueó sin rotar."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +564,7 @@ if __name__ == "__main__":
             test_rotacion_crea_nuevo_archivo,
             test_naming_archivos_ring,
             test_query_abarca_multiples_archivos,
+            test_rotacion_bug_cambio_dia,
         ]),
         ("política de retención FIFO", [
             test_retencion_elimina_archivos_antiguos,
