@@ -210,7 +210,7 @@ class StreamProcessor:
                     max_size_mb=self._max_size_mb,
                     archivo_duracion_s=self._archivo_duracion_s,
                     usar_fecha_filename=self._usar_fecha_filename,
-                    logger=None,  # Usamos nuestro propio logger
+                    logger=self._logger,
                 )
 
             self._abrir_pipe()

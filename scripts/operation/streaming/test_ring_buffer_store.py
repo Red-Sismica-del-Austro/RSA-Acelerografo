@@ -270,16 +270,22 @@ def test_naming_archivos_ring():
     """Los archivos se nombran con el formato ring_YYYYMMDD_HHMMSS.bin."""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = _make_store(tmpdir)
-        ts = datetime.datetime(2026, 6, 16, 14, 30, 0)
-        store.write_frame(_make_frame(hour=14, minute=30, second=0), ts)
+        ts = datetime.datetime.utcnow()
+        store.write_frame(
+            build_test_frame(
+                year=ts.year, month=ts.month, day=ts.day,
+                hour=ts.hour, minute=ts.minute, second=ts.second
+            ),
+            ts
+        )
         store.close()
 
         archivos = [f for f in os.listdir(tmpdir) if f.endswith('.bin')]
         assert len(archivos) == 1, f"Debe existir exactamente 1 archivo, encontrados: {archivos}"
         nombre = archivos[0]
         assert nombre.startswith("ring_"), f"Nombre debe comenzar con 'ring_': {nombre}"
-        assert nombre == "ring_20260616_143000.bin", \
-            f"Nombre esperado 'ring_20260616_143000.bin', obtenido: {nombre}"
+        esperado = f"ring_{ts.strftime('%Y%m%d_%H%M%S')}.bin"
+        assert nombre == esperado, f"Nombre esperado {esperado!r}, obtenido: {nombre}"
 
 
 def test_query_abarca_multiples_archivos():
@@ -539,6 +545,114 @@ def test_disk_usage_mb():
 
 
 # ---------------------------------------------------------------------------
+# Tests para correcciones de rotación y reanudación
+# ---------------------------------------------------------------------------
+
+def test_rotacion_multiples_dias():
+    """Verifica que si la fecha del dsPIC tiene >2 días de atraso, se rota sin colisionar."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Habilitar usar_fecha_filename=True y archivo_duracion_s muy corto para rotar
+        store = RingBufferStore(
+            directorio=tmpdir,
+            max_size_mb=10,
+            archivo_duracion_s=1,
+            usar_fecha_filename=True
+        )
+
+        # Simular fecha del dsPIC con 5 días de atraso
+        ts_dspic_1 = datetime.datetime.utcnow() - datetime.timedelta(days=5)
+        store.write_frame(_make_frame(year=ts_dspic_1.year, month=ts_dspic_1.month, day=ts_dspic_1.day, hour=12, minute=0, second=0), ts_dspic_1)
+
+        # Esperar 1.1s para forzar la duración superada
+        time.sleep(1.1)
+
+        # Escribir segunda trama (debería rotar)
+        ts_dspic_2 = ts_dspic_1 + datetime.timedelta(seconds=5)
+        store.write_frame(_make_frame(year=ts_dspic_2.year, month=ts_dspic_2.month, day=ts_dspic_2.day, hour=12, minute=0, second=5), ts_dspic_2)
+
+        store.close()
+
+        # Verificar que se crearon al menos 2 archivos distintos en disco
+        archivos = sorted(f for f in os.listdir(tmpdir) if f.endswith('.bin'))
+        assert len(archivos) >= 2, f"Se esperaban >= 2 archivos, encontrados: {archivos}"
+
+
+def test_rebuild_reanuda_archivo():
+    """Verifica que _rebuild_index reanuda el último archivo en modo append."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Crear la primera trama y cerrar el store
+        store1 = RingBufferStore(directorio=tmpdir, max_size_mb=10, archivo_duracion_s=3600)
+        ts1 = _ts(hour=14, minute=30, second=0)
+        frame1 = _make_frame(hour=14, minute=30, second=0, x=100)
+        store1.write_frame(frame1, ts1)
+        store1.close()
+
+        # Obtener el tamaño del archivo inicial
+        archivos = [f for f in os.listdir(tmpdir) if f.endswith('.bin')]
+        assert len(archivos) == 1
+        filepath = os.path.join(tmpdir, archivos[0])
+        tam_inicial = os.path.getsize(filepath)
+        _assert_eq(tam_inicial, FRAME_SIZE)
+
+        # Instanciar el segundo store; debería reanudar el archivo existente
+        store2 = RingBufferStore(directorio=tmpdir, max_size_mb=10, archivo_duracion_s=3600)
+        ts2 = _ts(hour=14, minute=30, second=1)
+        frame2 = _make_frame(hour=14, minute=30, second=1, x=200)
+        store2.write_frame(frame2, ts2)
+        store2.close()
+
+        # Verificar que no se creó otro archivo y que el archivo existente creció (modo append)
+        archivos_final = [f for f in os.listdir(tmpdir) if f.endswith('.bin')]
+        assert len(archivos_final) == 1, f"Se esperaba solo 1 archivo, encontrados: {archivos_final}"
+        tam_final = os.path.getsize(filepath)
+        _assert_eq(tam_final, FRAME_SIZE * 2, "El archivo debe contener exactamente 2 tramas")
+
+
+def test_colision_nombre_sufijo():
+    """Verifica que ante una colisión de nombres, se genera un sufijo incremental."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = _make_store(tmpdir, archivo_duracion_s=1)
+
+        # Usar utcnow para que diff_dias sea 0 y use el timestamp directamente
+        ts1 = datetime.datetime.utcnow()
+        raw1 = build_test_frame(
+            year=ts1.year, month=ts1.month, day=ts1.day,
+            hour=ts1.hour, minute=ts1.minute, second=ts1.second
+        )
+        store.write_frame(raw1, ts1)
+
+        # Esperar 1.1s
+        time.sleep(1.1)
+
+        # Escribir la segunda trama con el mismo timestamp para causar colisión
+        store.write_frame(raw1, ts1)
+        store.close()
+
+        archivos = sorted(f for f in os.listdir(tmpdir) if f.endswith('.bin'))
+        assert len(archivos) >= 2, f"Se esperaban >= 2 archivos, encontrados: {archivos}"
+        assert any("_001" in f for f in archivos), f"Falta el sufijo incremental en {archivos}"
+
+
+def test_retencion_archivo_unico_gigante():
+    """Verifica que un único archivo que supera el max_size_mb no rompe la retención."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Configurar un límite muy pequeño (e.g. 1 MB)
+        store = _make_store(tmpdir, max_size_mb=1, archivo_duracion_s=3600)
+
+        # Escribir 500 tramas en el mismo archivo (500 tramas * 2506B ≈ 1.2 MB)
+        # Esto superará el límite de 1 MB
+        for i in range(500):
+            ts = _ts(hour=12, minute=0, second=i % 60)
+            store.write_frame(_make_frame(hour=12, minute=0, second=i % 60), ts)
+
+        store.close()
+        # Verificar que el único archivo existe y se mantuvo intacto sin excepciones
+        archivos = sorted(f for f in os.listdir(tmpdir) if f.endswith('.bin'))
+        assert len(archivos) == 1, f"Se esperaba 1 archivo, encontrados: {archivos}"
+        assert os.path.getsize(os.path.join(tmpdir, archivos[0])) >= 500 * FRAME_SIZE
+
+
+# ---------------------------------------------------------------------------
 # Punto de entrada
 # ---------------------------------------------------------------------------
 
@@ -581,6 +695,12 @@ if __name__ == "__main__":
             test_time_range_vacio,
             test_time_range_con_datos,
             test_disk_usage_mb,
+        ]),
+        ("correcciones de rotación y reanudación", [
+            test_rotacion_multiples_dias,
+            test_rebuild_reanuda_archivo,
+            test_colision_nombre_sufijo,
+            test_retencion_archivo_unico_gigante,
         ]),
     ]
 

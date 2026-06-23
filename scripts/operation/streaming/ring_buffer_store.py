@@ -347,14 +347,20 @@ class RingBufferStore:
         indefinidamente la rotación.
         """
         if self._archivo_activo is None:
+            self._log_debug("[RING_DEBE_ROTAR] True: _archivo_activo es None (primera escritura)")
             return True
         if self._archivo_activo_inicio is None or self._archivo_activo_inicio_mono is None:
+            self._log_debug("[RING_DEBE_ROTAR] True: metadata del archivo activo está incompleta")
             return True
 
         # Criterio 1 (primario): tiempo real transcurrido desde apertura del archivo.
         # Inmune al bug de fecha del dsPIC porque no depende de los timestamps de tramas.
         tiempo_real_s = time.monotonic() - self._archivo_activo_inicio_mono
         if tiempo_real_s >= self._archivo_duracion_s:
+            self._log_debug(
+                f"[RING_DEBE_ROTAR] True: Criterio 1 (tiempo real). "
+                f"Transcurrido: {tiempo_real_s:.1f}s >= Límite: {self._archivo_duracion_s}s"
+            )
             return True
 
         # Criterio 2: regresión temporal explícita.
@@ -365,6 +371,11 @@ class RingBufferStore:
         # para no rotar innecesariamente ante timestamps idénticos al inicio.
         delta_ts = (timestamp - self._archivo_activo_inicio).total_seconds()
         if delta_ts < 0 and tiempo_real_s >= self._archivo_duracion_s * 0.9:
+            self._log_debug(
+                f"[RING_DEBE_ROTAR] True: Criterio 2 (regresión temporal). "
+                f"delta_ts: {delta_ts:.1f}s, tiempo_real_s: {tiempo_real_s:.1f}s "
+                f"(>= {self._archivo_duracion_s * 0.9:.1f}s)"
+            )
             # Regresión + tiempo real casi cumplido → rotar
             return True
 
@@ -383,16 +394,26 @@ class RingBufferStore:
 
         # Generar nombre del nuevo archivo.
         # Corrección por bug dsPIC en cambio de día: si el timestamp de la trama
-        # tiene exactamente 1 día de atraso respecto al reloj UTC del sistema
-        # (cruce de medianoche donde dsPIC aún reporta el día anterior),
+        # tiene 1 o más días de atraso respecto al reloj UTC del sistema
+        # (cruce de medianoche o días acumulados donde dsPIC aún reporta el día anterior),
         # se usa utcnow() para que el nombre del archivo refleje la fecha real.
-        # Para discrepancias mayores (datos históricos, tests) se usa el timestamp.
+        # Para discrepancias menores (datos históricos, tests) se usa el timestamp.
         ahora_utc = datetime.datetime.utcnow()
         diff_dias = (ahora_utc.date() - timestamp.date()).days
-        ts_nombre = ahora_utc if diff_dias == 1 else timestamp
+        ts_nombre = ahora_utc if diff_dias >= 1 else timestamp
         ts_str = ts_nombre.strftime("%Y%m%d_%H%M%S")
         nombre = f"ring_{ts_str}.bin"
         nuevo_path = os.path.join(self._directorio, nombre)
+
+        # Evitar colisión de nombres (protección ante edge cases)
+        if os.path.exists(nuevo_path):
+            for i in range(1, 1000):
+                nombre_alt = f"ring_{ts_str}_{i:03d}.bin"
+                path_alt = os.path.join(self._directorio, nombre_alt)
+                if not os.path.exists(path_alt):
+                    nuevo_path = path_alt
+                    nombre = nombre_alt
+                    break
 
         # Abrir nuevo archivo
         self._archivo_activo = open(nuevo_path, "wb")
@@ -499,6 +520,25 @@ class RingBufferStore:
 
         with self._lock:
             self._index = indice_recuperado
+
+            # Reanudar escritura en el último archivo en modo append si existe
+            if indice_recuperado:
+                ultimo = indice_recuperado[-1]
+                try:
+                    self._archivo_activo = open(ultimo.filepath, "ab")
+                    self._archivo_activo_path = ultimo.filepath
+                    self._archivo_activo_inicio = ultimo.start_time
+                    self._archivo_activo_inicio_mono = time.monotonic()
+                    self._archivo_activo_frame_count = ultimo.frame_count
+                    self._log_info(
+                        f"[RING_REBUILD] Reanudando escritura en archivo activo: "
+                        f"{os.path.basename(ultimo.filepath)} con {ultimo.frame_count} tramas."
+                    )
+                except Exception as e:
+                    self._log_warning(
+                        f"No se pudo abrir el último archivo {ultimo.filepath} "
+                        f"para reanudación: {e}"
+                    )
 
         if indice_recuperado:
             oldest = indice_recuperado[0].start_time
@@ -628,6 +668,12 @@ class RingBufferStore:
             self._logger.warning(msg)
         else:
             logging.warning(msg)
+
+    def _log_debug(self, msg: str) -> None:
+        if self._logger:
+            self._logger.debug(msg)
+        else:
+            logging.debug(msg)
 
     def _log_ring_rotate(self, old_file: str, new_file: str) -> None:
         if self._logger and hasattr(self._logger, "ring_rotate"):
