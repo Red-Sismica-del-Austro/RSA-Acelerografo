@@ -25,6 +25,7 @@ Configuración de log:
 
 import os
 import sys
+import json
 import signal
 import logging
 import argparse
@@ -497,11 +498,43 @@ def main() -> None:
     project_root = os.getenv("PROJECT_LOCAL_ROOT")
     logger = _setup_logger(project_root, verbose=args.verbose)
 
+    # Cargar valores por defecto
+    max_size_mb = args.max_size_mb
+    buffer_dir = args.buffer_dir
+    archivo_duracion_s = args.duracion_archivo
+
+    # Intentar cargar configuración activa desde configuracion_dispositivo.json
+    if project_root:
+        config_path = os.path.join(project_root, "configuracion", "configuracion_dispositivo.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                ring_config = config.get("streaming", {}).get("ring_buffer", {})
+                
+                if "max_size_mb" in ring_config:
+                    max_size_mb = int(ring_config["max_size_mb"])
+                if "directorio" in ring_config:
+                    buffer_dir = ring_config["directorio"]
+                if "archivo_duracion_min" in ring_config:
+                    archivo_duracion_s = int(ring_config["archivo_duracion_min"]) * 60
+                
+                logger.info(
+                    f"[STREAM_CONFIG] Cargada configuración desde JSON: "
+                    f"max_size_mb={max_size_mb} | buffer_dir={buffer_dir} | "
+                    f"duracion_s={archivo_duracion_s}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[STREAM_CONFIG_ERROR] No se pudo parsear configuracion_dispositivo.json, "
+                    f"se usarán los valores por defecto/argumentos: {e}"
+                )
+
     processor = StreamProcessor(
         pipe_path=args.pipe,
-        buffer_dir=args.buffer_dir,
-        max_size_mb=args.max_size_mb,
-        archivo_duracion_s=args.duracion_archivo,
+        buffer_dir=buffer_dir,
+        max_size_mb=max_size_mb,
+        archivo_duracion_s=archivo_duracion_s,
         usar_fecha_filename=DEFAULT_USAR_FECHA_FILENAME,
         dry_run=args.dry_run,
         logger=logger,
