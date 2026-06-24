@@ -1,276 +1,70 @@
-# AGENTS.md
+# AGENTS.md — Instrucciones de Sistema para Agentes de IA
 
-This file provides guidance to AI agents when working with code in this repository.
+Este archivo contiene el prompt de sistema y las directrices operativas que regulan el comportamiento y el procesamiento de la información por parte de los agentes de Inteligencia Artificial (IA) en el repositorio `RSA-Acelerografo`.
 
-## Project Overview
+---
 
-This is a **seismograph data acquisition system** designed for continuous seismic monitoring. The system uses a **dsPIC33EP microcontroller** interfaced with an **ADXL355 accelerometer** (250 Hz sampling, 3 axes) to capture acceleration data, which is then transferred to a **Raspberry Pi 3B+ with Raspbian GNU/Linux 11 (bullseye)** via SPI for processing, storage, and optional cloud backup.
+## 🚨 Jerarquía de la Verdad (Regla Crítica)
 
-## Instructions for AI Agents (🚨 READ FIRST)
-
-1. **Context Maintenance**: Every time you modify a script in `scripts/operation/` or `scripts/task/`, you **MUST** update its corresponding `.md` file in `docs/context/`. This ensures the documentation stays technically accurate for future agents.
-2. **Path Integrity**: Always use `$PROJECT_LOCAL_ROOT` for absolute paths in scripts, configuration, and logs. Never hardcode user-specific paths.
-3. **Structured Logging**: Use `StructuredLogger` for all operational scripts to maintain a unified and searchable audit trail.
-4. **Dry-run Safety**: When modifying file management or deletion logic, always implement or test with a `--dry-run` mode first to avoid accidental data loss.
-
-### System Architecture
+Cuando existan discrepancias o contradicciones entre la documentación técnica, los registros históricos y las bitácoras de sesiones, debes aplicar estrictamente la siguiente **Jerarquía de la Verdad**:
 
 ```mermaid
 graph TD
-    A[ADXL355 Sensor 250Hz] --> B[dsPIC33EP Firmware]
-    B -- SPI --> C[Raspberry Pi]
-    C --> D[registro_continuo.c]
-    D --> E[.dat binary files]
-    E --> F[binary_to_mseed.py]
-    F --> G[.mseed files STEIM1]
-    G --> H[gestor_archivos_acq.py]
-    H --> I[Google Drive online mode]
-```
-
-### Key Capabilities
-- **Continuous recording**: 24/7 data acquisition with hourly file rotation
-- **Event detection**: STA/LTA algorithm for seismic event identification
-- **Standard format**: Mini-SEED output with FDSN metadata compliance
-- **Dual mode operation**: Online (cloud backup) and offline (local storage)
-- **Real-time streaming**: Named pipe (`/tmp/my_pipe`) for live data access
-- **Automated orchestration**: Cron-based system management with hourly restarts
-
-### Technical Specifications
-- **Sampling rate**: 250 Hz (configurable)
-- **Channels**: 3 (Z, N, E for vertical, north, east)
-- **Data format**: Binary .dat (proprietary) → Mini-SEED (standard)
-- **Compression**: STEIM1 for efficient storage
-- **Time synchronization**: GPS + DS3234 RTC on dsPIC
-
-
-## Detailed Documentation
-
-For in-depth technical information about each component, refer to these context files:
-
-- **[Firmware (dsPIC33EP)](docs/context/firmware_context.md)** - Microcontroller firmware, sensor interface, time synchronization
-- **[Main Acquisition (registro_continuo)](docs/context/registro_continuo_context.md)** - C program on RPi, SPI communication, data storage
-- **[Format Conversion (binary_to_mseed)](docs/context/binary_to_mseed_context.md)** - Binary to Mini-SEED conversion, 4 operation modes, gap handling
-- **[Segment Extraction (extract_segment)](docs/context/extract_segment_context.md)** - Time-windowed extraction from Mini-SEED files
-- **[File Management (gestor_archivos_acq)](docs/context/gestor_archivos_acq_context.md)** - Google Drive integration, dual-mode storage management
-- **[MQTT Coordinator](docs/context/mqtt_coordinator_context.md)** - Reactive MQTT agent, telemetry, remote commands
-
-
-## Environment Setup
-
-The project uses two key environment variables defined in `/etc/profile.d/project_paths.sh`:
-- `PROJECT_GIT_ROOT`: Path to the Git repository (e.g., `/home/rsa/git/RSA-Acelerografo`)
-- `PROJECT_LOCAL_ROOT`: Path to the deployed project (e.g., `/home/rsa/projects/acelerografo`)
-
-**Important**: Paths in `configuracion_dispositivo.json` must match these environment variables. Operational Python scripts must use `PROJECT_LOCAL_ROOT` to resolve absolute paths for configuration and logs.
-
-### Python Virtual Environment
-
-All Python dependencies are managed through a virtual environment located at `$PROJECT_LOCAL_ROOT/.venv/`. The venv is created with `--system-site-packages` to inherit precompiled apt packages (numpy, scipy, matplotlib), while lighter packages (obspy, paho-mqtt, google-api, etc.) are installed via pip inside the venv from `requirements.txt`.
-
-- **Python interpreter**: `$PROJECT_LOCAL_ROOT/.venv/bin/python3`
-- **Dependencies file**: `$PROJECT_GIT_ROOT/requirements.txt`
-- **Setup script**: `scripts/setup/crear_entorno_virtual.sh`
-
-**Important**: Never install Python packages globally with `sudo pip3 install`. All pip packages must go through the virtual environment.
-
-### Coding Standards
-- **Path Resolution**: Use `os.getenv("PROJECT_LOCAL_ROOT")` to define base paths.
-  ```python
-  project_root = os.getenv("PROJECT_LOCAL_ROOT")
-  config_path = os.path.join(project_root, "configuracion", "file.json")
-  ```
-- **Logging**: Use `StructuredLogger` for all operational scripts to ensure consistent audit trails.
-- **MQTT**: New scripts should follow the hierarchical topic structure and use `.env` for credentials.
-
-## Development Workflow (Remote via SSHFS)
-
-Since development is typically done from a PC via `sshfs`, changes in `PROJECT_GIT_ROOT` are not immediately live on the Raspberry Pi's operational system.
-
-1. **Edit**: Modify files in the Git repository folder from your local machine.
-2. **Apply Changes**: The user MUST run `menu.sh` on the Raspberry Pi. The AI ​​agent should not run this option.
-   - Use **Option 3 (Actualizar)** to sync code changes (Python, C binaries, or config templates). 
-   - Use **Option 2 (Desplegar)** ONLY for initial setup or clean installs (Warning: overwrites local configurations).
-3. **Verify**: Check logs in `$PROJECT_LOCAL_ROOT/log-files/` to ensure everything is running correctly.
-
-**Important**: Never modify files directly in `$PROJECT_LOCAL_ROOT` as they will be overwritten during the next update.
-
-## Initial Setup and Update Commands
-
-```mermaid
-graph TD
-    Start((Inicio)) --> Pull[git pull]
-    Pull --> Menu[bash menu.sh]
-    Menu --> Op0[0. Variables de Entorno]
-    Op0 --> Op1[1. Instalar Librerías + Venv]
-    Op1 --> Op2[2. Desplegar / 3. Actualizar]
-    Op2 --> End((Fin))
+    A[Nivel 1: ADRs -docs/adr/- <br> Decisiones de Diseño Inmutables] --> B[Nivel 2: Contextos Técnicos -docs/context/- <br> Arquitectura de Código Actual]
+    B --> C[Nivel 3: Estado de Desarrollo -docs/blueprints/ y docs/progress/- <br> Planificación y Transición Activa]
+    C --> D[Nivel 4: Memoria Histórica -Bitácoras de Sesiones- <br> Evolución y Registro de Jornadas]
     
-    style Start fill:#f9f,stroke:#333
-    style End fill:#f9f,stroke:#333
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style B fill:#bbf,stroke:#333,stroke-width:2px
+    style C fill:#ddf,stroke:#333,stroke-width:1px
+    style D fill:#eee,stroke:#333,stroke-width:1px
 ```
 
-```bash
-# For a new station setup:
-bash menu.sh
-# Then select: 0 (environment vars) -> 1 (install libs + create venv) -> 2 (deploy)
+### Reglas de Validación de Información:
+1.  **Invalidez Histórica:** El Contexto Técnico (`docs/context/`) y los ADRs actuales (`docs/adr/`) **invalidan** cualquier contenido contradictorio que se encuentre en las bitácoras de sesiones históricas o en conversaciones pasadas. Las bitácoras reflejan el estado del sistema en un punto del tiempo histórico, mientras que los contextos técnicos y los ADRs documentan la estructura física y lógica vigente.
+2.  **Inmutabilidad de Decisiones:** Un ADR aceptado (`docs/adr/`) es la máxima autoridad de diseño. Si la implementación actual descrita en un contexto técnico contradice un ADR aceptado sin que exista un ADR posterior que lo reemplace, debes reportarlo de inmediato al usuario como una anomalía o deuda técnica.
 
-# To update an existing installation after pulling changes:
-git pull
-bash menu.sh  # Select option 3 (Actualizar) - also updates venv if requirements.txt changed
+---
 
-# To clean global pip packages before migrating to venv:
-bash menu.sh  # Select option 4 (Desinstalar librerías globales)
-```
+## 🛠️ Directrices Operativas del Agente
 
-## Configuration Files
+1.  **Mantenimiento de Contexto:** Cada vez que modifiques o refactorices un script en `scripts/operation/` o `scripts/task/`, es obligatorio que actualices su correspondiente archivo `.md` en `docs/context/`. El contexto técnico debe mantenerse sincronizado con la realidad del código fuente.
+2.  **Desarrollo Remoto y Restricción SSHFS:** 
+    *   Este proyecto se desarrolla localmente (a través de `sshfs` en la carpeta `montajes/`), pero se ejecuta en una Raspberry Pi en producción.
+    *   **Prohibición de Ejecución:** Tienes estrictamente prohibido ejecutar comandos autónomos (iniciar daemons, compilar C, o realizar pruebas físicas) en directorios bajo `montajes/`. Debes proporcionar los comandos exactos en bloques de código Bash y solicitar al usuario que los ejecute manualmente en la terminal de la Raspberry Pi.
+    *   **Sincronización:** Los cambios en caliente en el hardware objetivo se aplican ejecutando `bash menu.sh` (Opción 3: Actualizar) en la terminal de la Raspberry Pi.
+3.  **Variables de Entorno y Rutas:**
+    *   Usa siempre la variable de entorno `$PROJECT_LOCAL_ROOT` para definir rutas absolutas a archivos de configuración, base de datos de buffers y registros de logs en los daemons de producción.
+    *   Nunca hardcodees rutas específicas de usuario (ej. `/home/user/`).
+4.  **Formato de Commits (No ejecución directa):**
+    *   No debes realizar commits en la terminal de forma autónoma.
+    *   Muestra el mensaje de commit sugerido en español y minúsculas usando el formato estándar: `tipo: descripción` (ej. `feat: agregar...`, `fix: corregir...`, `docs: actualizar...`).
 
-All configuration files are in JSON format in the `configuration/` directory:
-- `configuracion_dispositivo.json`: Device ID, directories, operation mode (online/offline), Drive tokens
-  - **New parameters** (optional, have defaults):
-    - `umbral_espacio_minimo`: Minimum free disk space threshold for file cleanup
-    - `max_reintentos`: Maximum retry attempts for Drive uploads (default: 5)
-    - `tiempo_espera`: Wait time between retries in seconds (default: 2)
-- `configuracion_mseed.json`: Station metadata (coordinates, sampling rate, network code, etc.)
-- `configuracion_mqtt.json`: MQTT broker settings for event publishing
+---
 
-**Critical**: Always backup configuration files before updates.
+## 📂 Mapa de Documentación Semántica
 
-## Architecture
+Utiliza los siguientes enlaces para cargar y analizar la memoria estructural del proyecto:
 
-### Data Flow
-1. **C program** (`registro_continuo`) acquires data from accelerometer via SPI and writes binary files (`.dat`)
-2. **Python converter** (`binary_to_mseed.py`) converts binary to Mini-SEED format (`.mseed`)
-3. **File manager** (`gestor_archivos_acq.py`) handles uploads/cleanup based on mode:
-   - **Online mode**: Uploads `.mseed` files to Google Drive, manages disk space
-   - **Offline mode**: Keeps only most recent binary file, deletes old `.mseed` when disk < 10%
+### Contextos Técnicos (`docs/context/`)
+*   **Firmware**: [firmware_context.md](docs/context/firmware_context.md) — dsPIC33EP, adquisición y envío SPI.
+*   **Adquisición Principal**: [registro_continuo_context.md](docs/context/registro_continuo_context.md) — Binario C en RPi, SPI esclavo, escritura .dat y pipe.
+*   **Procesamiento de Stream**: [stream_processor_context.md](docs/context/stream_processor_context.md) — Daemon Python, consumo de named pipe y RingBufferStore.
+*   **Almacén de Buffer Circular**: [ring_buffer_store_context.md](docs/context/ring_buffer_store_context.md) — Persistencia binaria FIFO y corrección de fecha.
+*   **Conversión de Formatos**: [binary_to_mseed_context.md](docs/context/binary_to_mseed_context.md) — Conversión .dat a MiniSEED, gaps y fecha por filename.
+*   **Orquestador de Eventos**: [event_extractor_context.md](docs/context/event_extractor_context.md) — Despachador dual (buffer vs histórico) y aislamiento de ObsPy.
+*   **Recorte de Segmentos**: [extract_segment_context.md](docs/context/extract_segment_context.md) — CLI de corte temporal sobre miniSEED histórico.
+*   **Gestión de Almacenamiento**: [gestor_archivos_acq_context.md](docs/context/gestor_archivos_acq_context.md) — Ciclo de vida, subidas a Google Drive y espacio en disco.
+*   **Control de Interfaces Web**: [web_context.md](docs/context/web_context.md) — Servidor Flask local de configuración.
+*   **Decodificación de Tramas**: [frame_decoder_context.md](docs/context/frame_decoder_context.md) — Parsing de tramas binarias de 2506 bytes.
+*   **Herramientas de Test**: [test_ring_buffer_store_context.md](docs/context/test_ring_buffer_store_context.md) — Diagnóstico de persistencia circular.
 
-### Key Components
-
-**C Programs** (in `scripts/operation/acelerografo/`):
-- `registro_continuo_4.5.0.c`: Main data acquisition loop
-- `reset_master.c`: Resets the ADC hardware
-- `extraer_evento_binario_2.1.1.c`: Extracts event windows from continuous data
-- Custom libraries: `detector_eventos.c`, `lector_json.c`
-
-**Python Scripts**:
-- `scripts/operation/mseed/binary_to_mseed.py`: Converts binary to Mini-SEED
-  - Handles missing samples (gaps), invalid timestamps, configurable date extraction (binary frame vs filename)
-  - Supports 4 modes: `--continuous` (mode 1), `--event` (mode 2), `--file <file>` (mode 3), `--dir <dir>` (mode 4)
-- `scripts/operation/mseed/extract_segment.py`: Extracts temporal segments from Mini-SEED files
-  - CLI tool: `--start "YYYY-MM-DDZHH:MM:SS.fff" --duration <seconds>`
-  - Automatic file discovery by date pattern, auto-detects FLOAT32/STEIM2 encoding
-- `scripts/operation/drive/gestor_archivos_acq.py`: File lifecycle manager
-  - Dual mode: online (Drive upload + retention + space control) / offline (maximize local storage)
-  - 3-level file protection: active file, failed upload, already uploaded
-  - Supports `--dry-run` for simulation without changes
-- `scripts/operation/mqtt/mqtt_coordinator.py`: Reactive MQTT agent (daemon via Supervisor)
-  - Publishes telemetry (state + hardware health every 5 min)
-  - Receives remote commands via dispatcher pattern (e.g., `extract_event`)
-  - Compatible with paho-mqtt v1.x and v2.x
-- `scripts/operation/mqtt/event_extractor.py`: Event extraction orchestrator
-  - Safely invokes `extract_segment.py` in venv and `subir_archivo.py` in system Python via `subprocess`
-  - Runs in a background thread to prevent blocking the MQTT loop
-- `scripts/operation/mqtt/test_event_extractor.py`: Diagnostic tool for the extraction pipeline
-
-**Task Scripts** (in `scripts/task/`):
-- `registrocontinuo.sh`: Service control script (start/stop/restart)
-- See `crontab.txt` for scheduled tasks
-
-### Cron Jobs
-- Every 60 minutes: Restart continuous recording
-- `@reboot`: Reset hardware, upload pending files, start recording
-
-## Build System
-
-The project includes C programs that need compilation:
-```bash
-# Compile C programs (done automatically by deploy.sh/update.sh)
-cd scripts/setup
-make -f makefile
-```
-
-Executables are placed in `$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/`.
-
-## Common Operations
-
-### Manual file conversion
-```bash
-# Single file
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/binary_to_mseed.py --file <filename.dat>
-
-# Batch convert entire directory
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/binary_to_mseed.py --dir /path/to/dat/files
-```
-
-### Extract temporal segments from Mini-SEED files
-```bash
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/mseed/extract_segment.py --start "2024-01-15Z14:30:45.250" --duration 60
-# Extracts 60 seconds starting from the specified UTC time
-# Note: Time format must use UTC (Z) format: YYYY-MM-DDZHH:MM:SS.fff
-```
-
-### Control continuous recording
-```bash
-/usr/local/bin/registrocontinuo start|stop|restart
-```
-
-### Upload files to Drive
-```bash
-# Upload by type flag
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py --continuous <filename.dat>
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py --mseed <filename.mseed>
-$PROJECT_LOCAL_ROOT/.venv/bin/python3 scripts/operation/drive/subir_archivo.py --event <filename.dat>
-```
-
-## Project Structure
-
-```mermaid
-graph LR
-    Root["Acelerografo/"] --- Config["configuration/"]
-    Root --- Libs["main-libraries/"]
-    Root --- Docs["docs/"]
-    Root --- Req["requirements.txt"]
-    Root --- Scripts["scripts/"]
-
-    Docs --- Context["context/"]
-    
-    Scripts --- Env["env/"]
-    Scripts --- Setup["setup/"]
-    Scripts --- Op["operation/"]
-    Scripts --- Task["task/"]
-      
-    Op --- Acq["acelerografo/ (C)"]
-    Op --- Mseed["mseed/ (Py)"]
-    Op --- Drive["drive/ (Py)"]
-    Op --- MQTT["mqtt/ (Py)"]
-        
-    Root --- Menu["menu.sh"]
-```
-
-- `configuration/`: JSON config files
-- `main-libraries/`: bcm2835 and wiringPi for Raspberry Pi GPIO/SPI
-- `requirements.txt`: Python pip dependencies for the virtual environment
-- `scripts/`:
-  - `env/`: Environment variable definitions
-  - `setup/`: `deploy.sh`, `update.sh`, `makefile`, `crear_entorno_virtual.sh`, `desinstalar_librerias.sh`, `instalar_librerias.sh`
-  - `operation/`: Core operational scripts (acelerografo C code, Python converters)
-  - `task/`: Cron-scheduled task scripts
-  - `dev-tests/`: Development/testing scripts
-- `docs/`: Scripts context files
-- `menu.sh`: Interactive setup menu (options 0-5)
-
-## Logging
-
-All logs are in `$PROJECT_LOCAL_ROOT/log-files/`:
-- `drive.log`, `gestor_acq.log`, `mqtt_coordinator.log`, `mseed.log`, `registro_continuo.log`
-
-Each logger is identified by station ID from `configuracion_dispositivo.json`.
-
-## Important Notes
-
-- The system expects bcm2835 library for SPI communication with the ADC
-- Binary data format: 2506-byte frames (2500 bytes data + 6 bytes timestamp)
-- Sampling rate typically 250 Hz, 3 channels (X, Y, Z)
-- Mini-SEED uses STEIM1 compression, record length 512 bytes
-
-
+### Decisiones de Arquitectura (`docs/adr/`)
+*   [ADR-001: Unificación de la Configuración](docs/adr/001_unificacion_configuracion_acelerografo.md) — Generación por plantillas y maestro local.
+*   [ADR-002: Panel Web con Flask](docs/adr/002_panel_web_configuracion_flask.md) — Interfaz ligera de administración (~15MB RAM).
+*   [ADR-003: Punto de Acceso WiFi Seguro](docs/adr/003_wifi_ap_aislamiento_firewall.md) — SSID estático y reglas iptables en eth0.
+*   [ADR-004: Implementación del Ring Buffer](docs/adr/004_implementacion_ring_buffer_acelerografo.md) — Persistencia FIFO estructurada y tiempo monótono.
+*   [ADR-005: Eliminación de STA/LTA Local](docs/adr/005_eliminacion_deteccion_eventos_local.md) — Simplificación del software C y estabilidad.
+*   [ADR-006: Apertura del Named Pipe con O_RDWR](docs/adr/006_apertura_named_pipe_lectura_escritura.md) — Mitigación de EOFs recurrentes en Python.
+*   [ADR-007: Estrategia Dual de Fechas](docs/adr/007_estrategia_dual_fecha_mseed.md) — Resolución del bug de medianoche vía USAR_FECHA_FILENAME.
+*   [ADR-008: Aislamiento de ObsPy en Subprocesos](docs/adr/008_aislamiento_obspy_subprocesos.md) — Desacoplamiento de dependencias pesadas en el demonio MQTT.
