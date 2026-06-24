@@ -45,7 +45,7 @@
         "habilitado": true,
         "ring_buffer": {
             "directorio": "/home/rsa/data/ring-buffer/",
-            "max_size_mb": 500,
+            "max_size_mb": 210,
             "archivo_duracion_min": 5
         }
     }
