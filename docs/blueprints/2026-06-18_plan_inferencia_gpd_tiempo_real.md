@@ -8,7 +8,7 @@
 
 ## Resumen Ejecutivo
 
-Este plan implementa la funcionalidad **A** del blueprint general ([2026-06-16_sistema_streaming_tiempo_real_búfer_circular.md](file:///home/rsa/git/montajes/acelerografo-DEV00/local-RSA/2026-06-16_sistema_streaming_tiempo_real_búfer_circular.md)): inferencia GPD en tiempo real. El sistema consumirá el stream de datos del `stream_processor.py` (ya en producción), ejecutará el modelo TFLite sobre ventanas deslizantes de 4 segundos, y publicará detecciones de fases P/S vía MQTT para disparar la extracción automática de eventos.
+Este plan implementa la funcionalidad **A** del blueprint general ([docs/blueprints/2026-06-15_plan_principal.md]: inferencia GPD en tiempo real. El sistema consumirá el stream de datos del `stream_processor.py` (ya en producción), ejecutará el modelo TFLite sobre ventanas deslizantes de 4 segundos, y publicará detecciones de fases P/S vía MQTT para disparar la extracción automática de eventos.
 
 ### Alcance
 
@@ -29,7 +29,7 @@ Este plan implementa la funcionalidad **A** del blueprint general ([2026-06-16_s
 | `ring_buffer_store.py` | ✅ Producción | `scripts/operation/streaming/` |
 | `stream_processor.py` | ✅ Producción | `scripts/operation/streaming/` |
 | `event_extractor.py` (con ring buffer) | ✅ Producción | `scripts/operation/mqtt/` |
-| Modelo TFLite `gpd_v2.tflite` | ✅ Disponible | `models/tflite/` (a copiar) |
+| Modelo TFLite `gpd_v2.tflite` | ✅ Disponible | `models/gpd_v2.tflite`|
 | `tflite-runtime` en requirements.txt | ✅ Ya incluido | `requirements.txt` |
 
 ---
@@ -58,11 +58,10 @@ configuration/
 └── configuracion_mqtt.json.template         [MODIFICADO] Fase 4 — Tópicos GPD
 
 models/
-└── tflite/
-    └── gpd_v2.tflite                 [NUEVO] Copiar desde repositorio GPD
+└── gpd_v2.tflite                            [NUEVO]
 
 scripts/task/
-└── gpd_worker.conf                   [NUEVO] Fase 5 — Servicio Supervisor
+└── gpd_worker.conf                          [NUEVO] Fase 5 — Servicio Supervisor
 ```
 
 ---
