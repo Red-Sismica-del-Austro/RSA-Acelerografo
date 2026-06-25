@@ -1,6 +1,5 @@
 # Plan de Implementación: Inferencia GPD en Tiempo Real
-
-> **Última revisión**: 2026-06-18 — Pendiente de confirmación de decisiones de diseño por el usuario.
+> **Última revisión**: 2026-06-25 — Prerrequisitos verificados: todos cumplidos. Bug de rotación corregido y validado en producción.
 
 > Sistema de detección sísmica automatizada mediante Machine Learning (Generalized Phase Detection) operando en tiempo real sobre el stream de datos del acelerógrafo RSA.
 
@@ -13,7 +12,7 @@ Este plan implementa la funcionalidad **A** del blueprint general ([docs/bluepri
 ### Alcance
 
 | Incluido | Excluido (fases futuras) |
-|----------|--------------------------|
+|----------|--------------------------| 
 | Publicación de tramas en memoria compartida (`/dev/shm/`) | Socket Unix para consumidores de streaming |
 | Módulo de preprocesamiento de señal (downsampling + filtrado) | SeedLink feeder |
 | Worker GPD con inferencia TFLite en ventanas deslizantes | Visualización local en tiempo real |
@@ -25,12 +24,15 @@ Este plan implementa la funcionalidad **A** del blueprint general ([docs/bluepri
 
 | Componente | Estado | Ubicación |
 |------------|--------|-----------|
-| `frame_decoder.py` | ✅ Producción | `scripts/operation/core/` |
-| `ring_buffer_store.py` | ✅ Producción | `scripts/operation/streaming/` |
-| `stream_processor.py` | ✅ Producción | `scripts/operation/streaming/` |
-| `event_extractor.py` (con ring buffer) | ✅ Producción | `scripts/operation/mqtt/` |
-| Modelo TFLite `gpd_v2.tflite` | ✅ Disponible | `models/gpd_v2.tflite`|
+| `frame_decoder.py` | ✅ Producción (27/27 tests) | `scripts/operation/core/` |
+| `ring_buffer_store.py` | ✅ Producción — bug de rotación **corregido** (24/24 tests) | `scripts/operation/streaming/` |
+| `stream_processor.py` | ✅ Producción — config dinámica desde JSON, logger conectado | `scripts/operation/streaming/` |
+| `event_extractor.py` (con ring buffer) | ✅ Producción (3/3 tests) | `scripts/operation/mqtt/` |
+| Modelo TFLite `gpd_v2.tflite` | ✅ Disponible | `models/gpd_v2.tflite` |
 | `tflite-runtime` en requirements.txt | ✅ Ya incluido | `requirements.txt` |
+
+> [!NOTE]
+> **Todos los prerrequisitos están cumplidos** (verificado 2026-06-25). El bug de rotación del ring buffer fue corregido y validado en producción por >20 horas, incluyendo cruce de medianoche y reanudación en modo append (ver [progreso 2026-06-24](file:///home/rsa/git/montajes/acelerografo-DEV00/docs/progress/2026-06-24_contexto-agente.md)). El ring buffer opera con `max_size_mb=210` (~24h de retención). Todas las fases del plan GPD pueden implementarse sin bloqueos.
 
 ---
 
@@ -811,7 +813,7 @@ Agregar sección `gpd` y `shared_memory` dentro de `streaming`:
          "habilitado": true,
          "ring_buffer": {
              "directorio": "/home/rsa/data/ring-buffer/",
-             "max_size_mb": 500,
+             "max_size_mb": 210,
              "archivo_duracion_min": 5
 -        }
 +        },
@@ -821,7 +823,7 @@ Agregar sección `gpd` y `shared_memory` dentro de `streaming`:
 +        },
 +        "gpd": {
 +            "habilitado": true,
-+            "modelo_ruta": "models/tflite/gpd_v2.tflite",
++            "modelo_ruta": "models/gpd_v2.tflite",
 +            "umbral_p": 0.95,
 +            "umbral_s": 0.95,
 +            "cooldown_s": 30,
@@ -844,8 +846,8 @@ Configuración de Supervisor para el worker GPD:
 
 ```ini
 [program:gpd_worker]
-command={{PROJECT_LOCAL_ROOT}}/.venv/bin/python3 {{PROJECT_LOCAL_ROOT}}/scripts/streaming/gpd_stream_worker.py
-directory={{PROJECT_LOCAL_ROOT}}/scripts/streaming/
+command={{PROJECT_LOCAL_ROOT}}/.venv/bin/python3 {{PROJECT_LOCAL_ROOT}}/scripts/operation/streaming/gpd_stream_worker.py
+directory={{PROJECT_LOCAL_ROOT}}/scripts/operation/streaming/
 environment=PROJECT_LOCAL_ROOT="{{PROJECT_LOCAL_ROOT}}"
 autostart=true
 autorestart=true
@@ -885,9 +887,9 @@ Agregar copia del modelo TFLite:
 
 ```diff
 +# Copiar modelo TFLite para GPD
-+mkdir -p "$PROJECT_LOCAL_ROOT/models/tflite"
-+if [ -f "$PROJECT_GIT_ROOT/models/tflite/gpd_v2.tflite" ]; then
-+    cp "$PROJECT_GIT_ROOT/models/tflite/gpd_v2.tflite" "$PROJECT_LOCAL_ROOT/models/tflite/"
++mkdir -p "$PROJECT_LOCAL_ROOT/models"
++if [ -f "$PROJECT_GIT_ROOT/models/gpd_v2.tflite" ]; then
++    cp "$PROJECT_GIT_ROOT/models/gpd_v2.tflite" "$PROJECT_LOCAL_ROOT/models/"
 +    echo "Modelo GPD TFLite copiado a producción."
 +fi
 ```
@@ -930,11 +932,11 @@ El modelo `gpd_v2.tflite` (~3.4 MB) debe copiarse desde el repositorio GPD al di
 
 ```
 Origen:  institucional/generalized-phase-detection/models/gpd_v2.tflite
-Destino: montajes/acelerografo-DEV00/models/tflite/gpd_v2.tflite
+Destino: montajes/acelerografo-DEV00/models/gpd_v2.tflite
 ```
 
 > [!WARNING]
-> **Restricción SSHFS**: La copia al dispositivo remoto debe realizarse manualmente por el usuario, no por el agente. El directorio `models/tflite/` en el repositorio del acelerógrafo sirve como almacén versionado del modelo.
+> **Restricción SSHFS**: La copia al dispositivo remoto debe realizarse manualmente por el usuario, no por el agente. El directorio `models/` en el repositorio del acelerógrafo sirve como almacén versionado del modelo.
 
 ### Pruebas
 
