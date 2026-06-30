@@ -20,6 +20,11 @@ montajes/acelerografo-DEV00/
 ├── configuration/
 │   └── configuracion_dispositivo.json.template (Modificado)
 ├── docs/
+│   ├── adr/
+│   │   └── 009_memoria_compartida_seqlock_ipc_streaming.md (Nuevo)
+│   ├── context/
+│   │   ├── shared_memory_publisher_context.md (Nuevo)
+│   │   └── signal_preprocessor_context.md (Nuevo)
 │   └── progress/
 │       └── 2026-06-30_contexto-agente.md (Nuevo)
 └── scripts/
@@ -67,7 +72,10 @@ montajes/acelerografo-DEV00/
     *   **`test_signal_preprocessor.py`**:
         *   Suite de 6 tests que verifican matemáticamente el downsampling de sinusoides bajo Nyquist, atenuación del filtro pasante, normalización en silencio y dimensiones del tensor de salida `(1, 400, 3)`. Todos pasan en verde.
 
----
+3.  **Documentación Técnica y Decisiones (Fases 1 y 2)**:
+    *   **ADR-009**: Se documentó la decisión arquitectónica de utilizar memoria compartida con protocolo Seqlock para el IPC de adquisición en tiempo real en `docs/adr/009_memoria_compartida_seqlock_ipc_streaming.md` (y en el repositorio global de metodologías).
+    *   **Contextos Técnicos**: Se crearon `docs/context/shared_memory_publisher_context.md` (detallando layout del segmento y Seqlock) y `docs/context/signal_preprocessor_context.md` (detallando downsampling polifásico y fase cero) para guiar semánticamente a futuros agentes.
+    *   **Índice de Metodologías**: Se indexaron los nuevos contextos y el ADR-009 en el archivo de referencia global `indice_tematico.md`.
 
 ## 📋 Pasos Sugeridos para el Siguiente Agente
 
