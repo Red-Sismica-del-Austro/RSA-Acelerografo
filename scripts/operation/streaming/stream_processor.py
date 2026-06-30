@@ -45,7 +45,8 @@ if _OPERATION_DIR not in sys.path:
     sys.path.insert(0, _OPERATION_DIR)
 
 from streaming.ring_buffer_store import RingBufferStore
-from core.frame_decoder import FRAME_SIZE, decode_timestamp, validate_timestamp
+from core.frame_decoder import FRAME_SIZE, decode_timestamp, validate_timestamp, decode_frame
+from streaming.shared_memory_publisher import SharedMemoryPublisher, SHM_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +142,8 @@ class StreamProcessor:
         max_size_mb: int = DEFAULT_MAX_SIZE_MB,
         archivo_duracion_s: int = DEFAULT_ARCHIVO_DURACION_S,
         usar_fecha_filename: bool = DEFAULT_USAR_FECHA_FILENAME,
+        shm_habilitado: bool = True,
+        shm_path: str = "",
         dry_run: bool = False,
         logger: Optional[logging.Logger] = None,
     ):
@@ -152,6 +155,8 @@ class StreamProcessor:
             archivo_duracion_s:  Segundos de datos por archivo del ring buffer.
             usar_fecha_filename: Si True, extrae la fecha del nombre de archivo
                                  al escribir en el ring buffer (mitiga bug dsPIC).
+            shm_habilitado:      Si True, habilita la publicación en memoria compartida.
+            shm_path:            Ruta del archivo de memoria compartida.
             dry_run:             Si True, lee del pipe pero NO escribe al buffer.
                                  Útil para diagnóstico y pruebas.
             logger:              Logger externo. Si None, usa logging.getLogger(__name__).
@@ -161,12 +166,15 @@ class StreamProcessor:
         self._max_size_mb = max_size_mb
         self._archivo_duracion_s = archivo_duracion_s
         self._usar_fecha_filename = usar_fecha_filename
+        self._shm_habilitado = shm_habilitado
+        self._shm_path = shm_path or SHM_PATH
         self._dry_run = dry_run
         self._logger = logger or logging.getLogger(__name__)
 
         # Estado interno
         self._fd: Optional[int] = None          # file descriptor del pipe (O_RDWR)
         self._ring_store: Optional[RingBufferStore] = None
+        self._shm_publisher: Optional[SharedMemoryPublisher] = None
         self._running = False                    # flag de bucle principal
         self._acumulador = bytearray()           # buffer para lecturas parciales
 
@@ -212,6 +220,12 @@ class StreamProcessor:
                     archivo_duracion_s=self._archivo_duracion_s,
                     usar_fecha_filename=self._usar_fecha_filename,
                     logger=self._logger,
+                )
+
+            if self._shm_habilitado and not self._dry_run:
+                self._shm_publisher = SharedMemoryPublisher(
+                    shm_path=self._shm_path,
+                    logger=self._logger
                 )
 
             self._abrir_pipe()
@@ -403,6 +417,17 @@ class StreamProcessor:
             self._ring_store.write_frame(raw_frame, timestamp)
             self.frames_procesados += 1
 
+            if self._shm_publisher is not None:
+                try:
+                    frame_data = decode_frame(raw_frame, usar_fecha_filename=False)
+                    self._shm_publisher.publish(
+                        samples=frame_data.samples,
+                        timestamp=frame_data.timestamp.timestamp(),
+                        clock_source=frame_data.clock_source,
+                    )
+                except Exception as e:
+                    self._logger.warning(f"[SHM_PUBLISH_ERROR] Error publicando en shm: {e}")
+
             if self.frames_procesados % 300 == 0:
                 # Log de progreso cada 300 tramas (≈5 minutos)
                 self._logger.info(
@@ -423,6 +448,15 @@ class StreamProcessor:
     def _cerrar_recursos(self) -> None:
         """Cierra el pipe y el ring buffer en orden correcto."""
         self._cerrar_pipe()
+        if self._shm_publisher is not None:
+            try:
+                self._shm_publisher.close()
+                self._logger.info("[SHM_CLOSE] Publicador de memoria compartida cerrado.")
+            except Exception as e:
+                self._logger.error(f"[SHM_CLOSE_ERROR] Error cerrando publicador shm: {e}")
+            finally:
+                self._shm_publisher = None
+
         if self._ring_store is not None:
             try:
                 self._ring_store.close()
@@ -484,6 +518,16 @@ def _parse_args() -> argparse.Namespace:
         help="Leer del pipe sin escribir al ring buffer (modo diagnóstico).",
     )
     parser.add_argument(
+        "--no-shm",
+        action="store_true",
+        help="Deshabilitar la publicación en memoria compartida (/dev/shm).",
+    )
+    parser.add_argument(
+        "--shm-path",
+        default="",
+        help="Ruta de memoria compartida (por defecto usa /dev/shm/rsa_current_frame).",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Mostrar logs también en stdout.",
@@ -502,6 +546,8 @@ def main() -> None:
     max_size_mb = args.max_size_mb
     buffer_dir = args.buffer_dir
     archivo_duracion_s = args.duracion_archivo
+    shm_habilitado = not args.no_shm
+    shm_path = args.shm_path
 
     # Intentar cargar configuración activa desde configuracion_dispositivo.json
     if project_root:
@@ -510,7 +556,9 @@ def main() -> None:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                ring_config = config.get("streaming", {}).get("ring_buffer", {})
+                streaming_config = config.get("streaming", {})
+                ring_config = streaming_config.get("ring_buffer", {})
+                shm_config = streaming_config.get("shared_memory", {})
                 
                 if "max_size_mb" in ring_config:
                     max_size_mb = int(ring_config["max_size_mb"])
@@ -519,10 +567,19 @@ def main() -> None:
                 if "archivo_duracion_min" in ring_config:
                     archivo_duracion_s = int(ring_config["archivo_duracion_min"]) * 60
                 
+                if "habilitado" in shm_config:
+                    shm_habilitado = bool(shm_config["habilitado"])
+                if "ruta" in shm_config:
+                    shm_path = shm_config["ruta"]
+
+                if args.no_shm:
+                    shm_habilitado = False
+                
                 logger.info(
                     f"[STREAM_CONFIG] Cargada configuración desde JSON: "
                     f"max_size_mb={max_size_mb} | buffer_dir={buffer_dir} | "
-                    f"duracion_s={archivo_duracion_s}"
+                    f"duracion_s={archivo_duracion_s} | shm_habilitado={shm_habilitado} | "
+                    f"shm_path={shm_path}"
                 )
             except Exception as e:
                 logger.warning(
@@ -536,6 +593,8 @@ def main() -> None:
         max_size_mb=max_size_mb,
         archivo_duracion_s=archivo_duracion_s,
         usar_fecha_filename=DEFAULT_USAR_FECHA_FILENAME,
+        shm_habilitado=shm_habilitado,
+        shm_path=shm_path,
         dry_run=args.dry_run,
         logger=logger,
     )

@@ -47,6 +47,10 @@
             "directorio": "/home/rsa/data/ring-buffer/",
             "max_size_mb": 210,
             "archivo_duracion_min": 5
+        },
+        "shared_memory": {
+            "habilitado": true,
+            "ruta": "/dev/shm/rsa_current_frame"
         }
     }
 }
