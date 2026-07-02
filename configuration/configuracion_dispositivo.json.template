@@ -51,6 +51,22 @@
         "shared_memory": {
             "habilitado": true,
             "ruta": "/dev/shm/rsa_current_frame"
+        },
+        "gpd": {
+            "habilitado": true,
+            "modelo_ruta": "models/gpd.tflite",
+            "umbral_p": 0.95,
+            "umbral_s": 0.95,
+            "cooldown_s": 30,
+            "ventana_pre_evento_s": 60,
+            "ventana_post_evento_s": 60,
+            "auto_extract": true,
+            "auto_upload": true,
+            "filtro": {
+                "habilitado": true,
+                "freq_min_hz": 3.0,
+                "freq_max_hz": 20.0
+            }
         }
     }
 }
