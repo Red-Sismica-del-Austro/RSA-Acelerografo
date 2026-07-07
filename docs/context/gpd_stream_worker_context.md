@@ -2,15 +2,15 @@
 proyecto: acelerografo-DEV00
 tipo: contexto_tecnico
 archivo: scripts/operation/streaming/gpd_stream_worker.py
-temas: [gpd, inferencia, tflite, streaming, mqtt, memoria_compartida, deteccion_sismica]
-generado: 2026-07-02
+temas: [gpd, inferencia, tflite, streaming, mqtt, memoria_compartida, deteccion_sismica, csv, fase4]
+generado: 2026-07-07
 ---
 # gpd_stream_worker.py — Contexto para Agentes IA
 
 > Daemon de inferencia GPD en tiempo real: consume tramas de memoria compartida, acumula un buffer deslizante de 8 s, ejecuta el modelo TFLite y publica detecciones de fases P/S vía MQTT con cooldown anti-spam configurable.
 
 **Ruta**: `scripts/operation/streaming/gpd_stream_worker.py`
-**LOC**: ~726 | **Lenguaje**: Python 3 | **Dependencias**: `numpy`, `tflite_runtime`, `paho-mqtt` (condicionales), `streaming.shared_memory_publisher.SharedMemoryReader`, `core.signal_preprocessor.SignalPreprocessor`
+**LOC**: ~856 | **Lenguaje**: Python 3 | **Dependencias**: `numpy`, `tflite_runtime`, `paho-mqtt` (condicionales), `streaming.shared_memory_publisher.SharedMemoryReader`, `core.signal_preprocessor.SignalPreprocessor`, `core.event_logger.EventLogger`, `mqtt.event_extractor.extraer_y_subir_evento` (condicional, solo modo offline)
 **Proceso**: Se ejecuta como daemon Supervisor (`gpd_worker.conf`). Arranca como `python3 gpd_stream_worker.py` con variables de entorno `PROJECT_LOCAL_ROOT`.
 
 ---
@@ -30,16 +30,20 @@ graph TD
     WINDOW["prepare_window(800 muestras)\nFiltro Butterworth 3-20 Hz + padding\nExtracción central (200:600)\nNormalización per-channel"]
     TFLITE["TFLite Interpreter\nmodels/gpd.tflite\n(1,400,3) float32 → (1,3) float32\n[noise, P, S]"]
     EVAL{"prob_P ≥ umbral_p\no prob_S ≥ umbral_s\ny sin cooldown activo?"}
-    MQTT["Publicar MQTT\n<station_id>/events/detected\nQoS=1, payload JSON"]
-    LOG["Log de detección\n[GPD_DETECTION]"]
+    CSV["EventLogger\nregistrar_deteccion()\nconfirmado=False"]
+    MODE{"modo_adquisicion?"}
+    MQTT["_publicar_mqtt()\n<station_id>/events/detected\nQoS=1"]
+    OFFLINE["_lanzar_extraccion_offline()\nhilo daemon\nextraer_y_subir_evento(upload=False)\n→ actualizar_confirmacion()"]
 
     SHM -->|"trama nueva (seq cambia)"| RESAMP
     RESAMP --> BUF
     BUF -->|"8 tramas acumuladas"| WINDOW
     WINDOW -->|"(1,400,3) float32"| TFLITE
     TFLITE --> EVAL
-    EVAL -->|"Sí"| MQTT
-    EVAL -->|"Sí"| LOG
+    EVAL -->|"Sí"| CSV
+    CSV --> MODE
+    MODE -->|"online"| MQTT
+    MODE -->|"offline"| OFFLINE
     EVAL -->|"No / cooldown"| SHM
     SHM -->|"sin trama nueva → sleep 10ms"| SHM
 ```
@@ -95,10 +99,12 @@ sequenceDiagram
 | `configuracion_dispositivo.json` | `streaming.gpd.filtro.habilitado` | `true` | Activa el filtro Butterworth pasabanda |
 | `configuracion_dispositivo.json` | `streaming.gpd.filtro.freq_min_hz` | `3.0` | Frecuencia mínima del pasabanda (Hz) |
 | `configuracion_dispositivo.json` | `streaming.gpd.filtro.freq_max_hz` | `20.0` | Frecuencia máxima del pasabanda (Hz) |
-| `configuracion_dispositivo.json` | `streaming.gpd.ventana_pre_evento_s` | `60` | Segundos previos al evento para extracción (usado por Fase 4) |
-| `configuracion_dispositivo.json` | `streaming.gpd.ventana_post_evento_s` | `60` | Segundos posteriores al evento para extracción (usado por Fase 4) |
-| `configuracion_dispositivo.json` | `streaming.gpd.auto_extract` | `true` | Activa extracción automática al detectar (usado por Fase 4) |
-| `configuracion_dispositivo.json` | `streaming.gpd.auto_upload` | `true` | Activa subida a Drive tras extracción (usado por Fase 4) |
+| `configuracion_dispositivo.json` | `streaming.gpd.ventana_pre_evento_s` | `60` | Segundos previos al evento para extracción |
+| `configuracion_dispositivo.json` | `streaming.gpd.ventana_post_evento_s` | `60` | Segundos posteriores al evento para extracción |
+| `configuracion_dispositivo.json` | `streaming.gpd.auto_extract` | `true` | Activa extracción automática al detectar |
+| `configuracion_dispositivo.json` | `streaming.gpd.auto_upload` | `true` | Activa subida a Drive tras extracción |
+| `configuracion_dispositivo.json` | `dispositivo.modo_adquisicion` | `"online"` | Bifurca el flujo post-detección: `"online"` publica MQTT, `"offline"` extrae directamente |
+| `configuracion_dispositivo.json` | `streaming.gpd.csv_dir` | `/home/rsa/data/eventos-detectados` | Directorio del CSV mensual de detecciones |
 | Variable de entorno | `PROJECT_LOCAL_ROOT` | `""` | Directorio raíz del proyecto en producción. Se usa para resolver rutas relativas del modelo y logs |
 | CLI arg | `--config <ruta>` | Auto-detectada | Ruta explícita al JSON de configuración |
 | CLI arg | `--station <id>` | Del JSON | Sobreescribe el ID de estación |
@@ -131,9 +137,12 @@ sequenceDiagram
 | `_ciclo_inferencia()` | Método privado | Corazón del bucle: compara `sequence_number`, lee trama, resamplea, acumula en buffer, invoca preprocesador e inferencia. |
 | `_ejecutar_inferencia(ventana)` | Método privado | Ejecuta `interpreter.invoke()` y retorna `(3,) float32` — `[noise, P, S]`. |
 | `_evaluar_deteccion(...)` | Método privado | Evalúa umbrales y cooldown. Retorna `dict` de detección o `None`. Prioridad: fase con mayor probabilidad entre P y S si ambas superan su umbral. |
-| `_publicar_deteccion(deteccion)` | Método privado | Serializa el dict a JSON y publica en `<station_id>/events/detected` (QoS=1). |
+| `_publicar_deteccion(deteccion)` | Método privado | **[Fase 4]** Bifurca por `_modo_adquisicion`: registra siempre en CSV (confirmado=False), luego llama a `_publicar_mqtt()` (online) o `_lanzar_extraccion_offline()` (offline). |
+| `_publicar_mqtt(deteccion)` | Método privado | Serializa el dict a JSON y publica en `<station_id>/events/detected` (QoS=1). Extraído de `_publicar_deteccion()` en Fase 4. |
+| `_lanzar_extraccion_offline(deteccion)` | Método privado | **[Fase 4]** Calcula ventana pre/post, parsea timestamp, lanza hilo daemon con `_run_extraccion_offline()`. |
+| `_run_extraccion_offline(...)` | Método privado | **[Fase 4]** Hilo: invoca `extraer_y_subir_evento(upload=False)` y actualiza CSV a `confirmado=True` si exitoso. |
 | `_cerrar_recursos()` | Método privado | Cierre ordenado de MQTT (`loop_stop` + `disconnect`) y SHM reader. Siempre se ejecuta en el bloque `finally` de `run()`. |
-| `main()` | Función | Entry point del script. Parsea CLI, carga el JSON de configuración, extrae la sección `streaming.gpd` y propaga `station_id` y parámetros MQTT. |
+| `main()` | Función | Entry point del script. Parsea CLI, carga el JSON de configuración, extrae la sección `streaming.gpd` y propaga `station_id`, `modo_adquisicion` y parámetros MQTT. |
 
 **Payload MQTT de detección** (`<station_id>/events/detected`, QoS=1):
 ```json
@@ -178,9 +187,8 @@ sequenceDiagram
 
 ## Limitaciones Conocidas / TODOs
 
-- **Sin `StructuredLogger`**: El worker usa `logging.Logger` estándar. Los métodos específicos de GPD (`gpd_load`, `gpd_detection`, etc.) están definidos en `structured_logger.py` pero aún no se conectan en este script. **Pendiente para Fase 5**.
 - **Cooldown no persiste entre reinicios**: `_last_detection_time` es en memoria. Si el worker se reinicia (por Supervisor), el cooldown se reinicia a 0. Esto podría generar una publicación inmediata al volver a arrancar.
-- **Un único tópico de detección**: Publica siempre en `<station_id>/events/detected`. El `mqtt_coordinator` (Fase 4) deberá suscribirse a este tópico para disparar la extracción automática.
 - **Modelo estático**: No hay mecanismo de recarga en caliente del modelo. Si se actualiza `gpd.tflite`, se debe reiniciar el servicio.
 - **`tflite_runtime` y `paho-mqtt` opcionales**: Las importaciones son condicionales. Si no están disponibles, el worker falla en `_cargar_modelo()` (RuntimeError) o continúa sin MQTT respectivamente. En tests unitarios se mockean.
+- **`event_extractor` opcional en modo offline**: Si el módulo `mqtt.event_extractor` no está en el path al iniciar, `_EXTRACTOR_AVAILABLE = False` y el modo offline degrada con un warning, sin crash.
 - **Timestamp de trama**: El `timestamp` leído desde el SHM es el timestamp del hardware (reloj del dsPIC). Si la deriva del reloj es significativa, los campos de ventana en el payload podrían estar desplazados respecto al tiempo UTC real.
