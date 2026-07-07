@@ -37,9 +37,10 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -52,6 +53,14 @@ if _OPERATION_DIR not in sys.path:
 
 from streaming.shared_memory_publisher import SharedMemoryReader, SHM_PATH
 from core.signal_preprocessor import SignalPreprocessor
+from core.event_logger import EventLogger
+
+# Importación condicional del extractor de eventos (solo necesario en modo offline)
+try:
+    from mqtt.event_extractor import extraer_y_subir_evento
+    _EXTRACTOR_AVAILABLE = True
+except ImportError:
+    _EXTRACTOR_AVAILABLE = False
 
 # Importación condicional de tflite_runtime para facilitar tests sin el runtime instalado
 try:
@@ -135,6 +144,13 @@ class GPDStreamWorker:
 
         # Ruta del segmento de memoria compartida
         self._shm_path: str = config.get("shm_path", SHM_PATH)
+
+        # --- Modo de adquisición (online/offline) ---
+        self._modo_adquisicion: str = config.get("modo_adquisicion", "online")
+
+        # --- Logger de eventos CSV ---
+        csv_dir = config.get("csv_dir", "/home/rsa/data/eventos-detectados")
+        self._event_logger = EventLogger(csv_dir=csv_dir, logger=logger)
 
         # --- Buffer circular (deque de filas de 100 muestras a 100 Hz) ---
         # maxlen = 8 para mantener exactamente 8 segundos (800 muestras acumuladas)
@@ -539,14 +555,41 @@ class GPDStreamWorker:
         return deteccion
 
     # -----------------------------------------------------------------------
-    # Publicación MQTT
+    # Publicación / despacho de detecciones
     # -----------------------------------------------------------------------
 
     def _publicar_deteccion(self, deteccion: dict) -> None:
         """
+        Procesa una detección de fase sísmica según el modo de adquisición.
+
+        Ambos modos registran la detección en el CSV mensual (confirmado=False).
+        - ONLINE:  Publica en MQTT para que mqtt_coordinator coordine la extracción
+                   con la validación regional.
+        - OFFLINE: Lanza la extracción local en un hilo separado, sin pasar por MQTT.
+        """
+        # 1. Registrar en CSV (siempre, en ambos modos)
+        try:
+            self._event_logger.registrar_deteccion(
+                timestamp_centro=deteccion["timestamp"],
+                fase=deteccion["type"],
+                probabilidad=deteccion["probability"],
+                confirmado=False,
+                metodo="local_gpd",
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            self._logger.warning(f"[GPD_CSV_WARN] Error al registrar detección en CSV: {exc}")
+
+        if self._modo_adquisicion == "offline":
+            # Modo OFFLINE: extracción autónoma local en hilo separado
+            self._lanzar_extraccion_offline(deteccion)
+        else:
+            # Modo ONLINE: publicar en MQTT para validación regional
+            self._publicar_mqtt(deteccion)
+
+    def _publicar_mqtt(self, deteccion: dict) -> None:
+        """
         Publica la detección en el tópico MQTT <station_id>/events/detected.
 
-        El payload es un JSON con los campos definidos en _evaluar_deteccion().
         Si el cliente MQTT no está disponible, solo se registra en el log.
         """
         payload = json.dumps(deteccion, ensure_ascii=False)
@@ -558,11 +601,95 @@ class GPDStreamWorker:
                 if result.rc == 0:
                     self._logger.debug(f"[GPD_MQTT_PUB] Publicado en '{topic}': {payload}")
                 else:
-                    self._logger.warning(f"[GPD_MQTT_PUB_WARN] Publicación en '{topic}' retornó rc={result.rc}.")
+                    self._logger.warning(
+                        f"[GPD_MQTT_PUB_WARN] Publicación en '{topic}' retornó rc={result.rc}."
+                    )
             except Exception as exc:  # pylint: disable=broad-except
                 self._logger.warning(f"[GPD_MQTT_PUB_ERROR] Error publicando detección: {exc}")
         else:
             self._logger.info(f"[GPD_DETECTION_LOG] (sin MQTT) topic={topic} payload={payload}")
+
+    def _lanzar_extraccion_offline(self, deteccion: dict) -> None:
+        """
+        Lanza la extracción del evento en un hilo separado (modo offline).
+
+        Calcula el rango de extracción usando ventana_pre_evento_s y
+        ventana_post_evento_s de la configuración. Si event_extractor no está
+        disponible (ImportError), loguea un warning y no crashea.
+        """
+        if not _EXTRACTOR_AVAILABLE:
+            self._logger.warning(
+                "[GPD_OFFLINE] Módulo event_extractor no disponible. "
+                "No se puede extraer automáticamente."
+            )
+            return
+
+        ventana_pre = int(self._config.get("ventana_pre_evento_s", 60))
+        ventana_post = int(self._config.get("ventana_post_evento_s", 60))
+        ts_centro = deteccion["timestamp"]  # ISO8601 UTC con 'Z'
+
+        try:
+            dt_centro = datetime.fromisoformat(ts_centro.replace("Z", "+00:00"))
+        except ValueError as exc:
+            self._logger.error(
+                f"[GPD_OFFLINE_ERR] Timestamp de detección inválido '{ts_centro}': {exc}"
+            )
+            return
+
+        dt_start = dt_centro - timedelta(seconds=ventana_pre)
+        start_str = dt_start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        duration = ventana_pre + ventana_post
+
+        self._logger.info(
+            f"[GPD_OFFLINE_EXTRACT] Lanzando extracción autónoma — "
+            f"start={start_str} duration={duration}s ts_deteccion={ts_centro}"
+        )
+
+        hilo = threading.Thread(
+            target=self._run_extraccion_offline,
+            args=(deteccion, start_str, duration),
+            daemon=True,
+        )
+        hilo.start()
+
+    def _run_extraccion_offline(self, deteccion: dict, start: str, duration: float) -> None:
+        """
+        Pipeline de extracción offline ejecutado en hilo separado.
+
+        Invoca extraer_y_subir_evento() con upload=False (no sube a Drive en modo
+        offline) y actualiza el CSV a confirmado=True si la extracción es exitosa.
+        """
+        try:
+            resultado = extraer_y_subir_evento(
+                start=start,
+                duration=duration,
+                upload=False,            # Modo offline: no subir a Drive
+                delete_after_upload=False,
+                logger=self._logger,
+            )
+
+            if resultado.get("status") == "completed":
+                archivo = resultado.get("output_file", "")
+                try:
+                    self._event_logger.actualizar_confirmacion(
+                        timestamp_centro=deteccion["timestamp"],
+                        confirmado=True,
+                        archivo_mseed=archivo,
+                    )
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._logger.warning(
+                        f"[GPD_CSV_WARN] No se pudo actualizar CSV tras extracción: {exc}"
+                    )
+                self._logger.info(
+                    f"[GPD_OFFLINE_OK] Extracción completada → archivo={archivo}"
+                )
+            else:
+                self._logger.warning(
+                    f"[GPD_OFFLINE_FAIL] Extracción fallida: {resultado.get('message')}"
+                )
+
+        except Exception as exc:  # pylint: disable=broad-except
+            self._logger.error(f"[GPD_OFFLINE_ERROR] Error inesperado en extracción offline: {exc}")
 
     # -----------------------------------------------------------------------
     # Cierre y estadísticas
@@ -705,8 +832,11 @@ def main() -> None:
             "Se usarán valores por defecto."
         )
 
-    # Propagar station_id y MQTT al sub-diccionario gpd_config
+    # Propagar station_id, modo_adquisicion y MQTT al sub-diccionario gpd_config
     gpd_config["station_id"] = station_id
+    gpd_config["modo_adquisicion"] = (
+        full_config.get("dispositivo", {}).get("modo_adquisicion", "online")
+    )
     mqtt_cfg = full_config.get("mqtt", {})
     gpd_config.setdefault("mqtt_broker", mqtt_cfg.get("broker", "localhost"))
     gpd_config.setdefault("mqtt_port", mqtt_cfg.get("port", 1883))
