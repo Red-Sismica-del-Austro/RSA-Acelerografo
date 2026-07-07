@@ -928,12 +928,9 @@ def gpd_error(self, operation: str, error: str):
 
 ### Copia del Modelo TFLite
 
-El modelo `gpd_v2.tflite` (~3.4 MB) debe copiarse desde el repositorio GPD al directorio del acelerógrafo:
+El modelo `gpt.tflite` debe copiarse al directorio del acelerógrafo:
 
-```
-Origen:  institucional/generalized-phase-detection/models/gpd_v2.tflite
-Destino: montajes/acelerografo-DEV00/models/gpd_v2.tflite
-```
+
 
 > [!WARNING]
 > **Restricción SSHFS**: La copia al dispositivo remoto debe realizarse manualmente por el usuario, no por el agente. El directorio `models/` en el repositorio del acelerógrafo sirve como almacén versionado del modelo.
