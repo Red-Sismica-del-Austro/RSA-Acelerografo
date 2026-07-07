@@ -18,7 +18,8 @@
         "events_regional",
         "cmd_execute",
         "cmd_broadcast",
-        "config_set"
+        "config_set",
+        "events_local"
     ],
     "qos": {
         "telemetry": 1,

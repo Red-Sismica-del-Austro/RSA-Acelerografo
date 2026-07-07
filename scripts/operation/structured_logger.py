@@ -184,3 +184,39 @@ class StructuredLogger:
     def pipe_error(self, error: str):
         """[PIPE_ERROR] Error en lectura del named pipe"""
         self._log_structured("SUMMARY", "PIPE_ERROR", None, {"error": error})
+
+    # --- Métodos específicos para Inferencia GPD ---
+
+    def gpd_load(self, model_path: str, load_time_s: float):
+        """[GPD_LOAD] Modelo TFLite cargado correctamente"""
+        self._log_structured("SUMMARY", "GPD_LOAD", model_path, {"load_time": f"{load_time_s:.2f}s"})
+
+    def gpd_inference(self, prob_noise: float, prob_p: float, prob_s: float):
+        """[GPD_INFERENCE] Resultado de inferencia (solo en modo DEBUG)"""
+        self._log_structured("DEBUG", "GPD_INFERENCE", None, {
+            "noise": f"{prob_noise:.3f}", "P": f"{prob_p:.3f}", "S": f"{prob_s:.3f}"
+        })
+
+    def gpd_detection(self, phase_type: str, probability: float, timestamp: str):
+        """[GPD_DETECTION] Fase sísmica detectada por el modelo GPD"""
+        self._log_structured("SUMMARY", "GPD_DETECTION", phase_type, {
+            "prob": f"{probability:.4f}", "timestamp": timestamp
+        })
+
+    def gpd_cooldown(self, remaining_s: float):
+        """[GPD_COOLDOWN] Detección ignorada porque el cooldown sigue activo"""
+        self._log_structured("DEBUG", "GPD_COOLDOWN", None, {"remaining_s": f"{remaining_s:.1f}"})
+
+    def gpd_error(self, operation: str, error: str):
+        """[GPD_ERROR] Error en el pipeline de inferencia GPD"""
+        self._log_structured("SUMMARY", "GPD_ERROR", operation, {"error": error})
+
+    def gpd_csv_write(self, csv_file: str, timestamp_centro: str):
+        """[GPD_CSV_WRITE] Detección registrada en CSV mensual"""
+        self._log_structured("INFO", "GPD_CSV_WRITE", csv_file, {"ts": timestamp_centro})
+
+    def gpd_csv_update(self, csv_file: str, timestamp_centro: str, confirmado: bool):
+        """[GPD_CSV_UPDATE] Registro actualizado en CSV mensual (confirmación de extracción)"""
+        self._log_structured("INFO", "GPD_CSV_UPDATE", csv_file, {
+            "ts": timestamp_centro, "confirmado": str(confirmado)
+        })
