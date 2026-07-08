@@ -183,6 +183,22 @@ function update_supervisor_config {
     else
         echo "No se detectaron cambios en la configuración de Supervisor (stream_processor)."
     fi
+
+    # --- gpd_worker ---
+    local src_gpd="$PROJECT_GIT_ROOT/scripts/task/gpd_worker.conf"
+    local temp_gpd="$PROJECT_LOCAL_ROOT/tmp-files/gpd_worker.conf.tmp"
+    local dest_gpd="/etc/supervisor/conf.d/gpd_worker.conf"
+
+    sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" "$src_gpd" > "$temp_gpd"
+
+    if [ ! -f "$dest_gpd" ] || ! cmp -s "$temp_gpd" "$dest_gpd"; then
+        echo "Actualizando configuración de Supervisor: $dest_gpd"
+        sudo cp "$temp_gpd" "$dest_gpd"
+        sudo supervisorctl reread
+        sudo supervisorctl update
+    else
+        echo "No se detectaron cambios en la configuración de Supervisor (gpd_worker)."
+    fi
 }
 
 
@@ -210,6 +226,15 @@ function update_venv_if_changed {
         echo "No se detectaron cambios en requirements.txt"
     fi
 }
+
+# Copiar modelo TFLite para GPD
+mkdir -p "$PROJECT_LOCAL_ROOT/models"
+if [ -f "$PROJECT_GIT_ROOT/models/gpd.tflite" ]; then
+    cp "$PROJECT_GIT_ROOT/models/gpd.tflite" "$PROJECT_LOCAL_ROOT/models/"
+    echo "Modelo GPD TFLite copiado a producción."
+else
+    echo "Advertencia: No se encontró el modelo $PROJECT_GIT_ROOT/models/gpd.tflite para copiar."
+fi
 
 # Revisar y actualizar el entorno virtual
 update_venv_if_changed
