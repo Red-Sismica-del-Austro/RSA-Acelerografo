@@ -791,17 +791,23 @@ def main() -> None:
 
     # Resolver PROJECT_LOCAL_ROOT
     project_root = os.environ.get("PROJECT_LOCAL_ROOT", "")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Resolver ruta de configuración
     if args.config:
         config_path = args.config
     elif project_root:
-        config_path = os.path.join(project_root, "configuration", "configuracion_dispositivo.json")
+        # Intentar en "configuracion" (producción) y luego en "configuration" (desarrollo/Git)
+        config_path = os.path.join(project_root, "configuracion", "configuracion_dispositivo.json")
+        if not os.path.exists(config_path):
+            config_path = os.path.join(project_root, "configuration", "configuracion_dispositivo.json")
     else:
         # Fallback: buscar relativo al directorio del script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, "..", "..", "..", "configuration", "configuracion_dispositivo.json")
+        config_path = os.path.join(script_dir, "..", "..", "..", "configuracion", "configuracion_dispositivo.json")
         config_path = os.path.normpath(config_path)
+        if not os.path.exists(config_path):
+            config_path = os.path.join(script_dir, "..", "..", "..", "configuration", "configuracion_dispositivo.json")
+            config_path = os.path.normpath(config_path)
 
     # Cargar configuración
     if not os.path.exists(config_path):
