@@ -473,7 +473,7 @@ def _manejar_deteccion_gpd_local(client, userdata: dict, payload: dict) -> None:
         return
 
     dt_start = dt_centro - timedelta(seconds=ventana_pre)
-    start_str = dt_start.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    start_str = dt_start.strftime("%Y-%m-%dZ%H:%M:%S.%f")[:-3]
     duration = ventana_pre + ventana_post
     request_id = f"gpd-auto-{timestamp_str}"
 

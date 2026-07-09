@@ -103,6 +103,10 @@ class StructuredLogger:
             # Llamada con dos argumentos (estilo estructurado)
             self._log_structured("SUMMARY", "ERROR", None, {"operation": operation, "error": error})
 
+    def debug(self, msg):
+        if self._should_log("DEBUG"):
+            self.logger.debug(msg)
+
     def info(self, msg):
         if self._should_log("INFO"):
             self.logger.info(msg)

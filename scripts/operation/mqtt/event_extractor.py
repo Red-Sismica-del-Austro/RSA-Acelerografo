@@ -116,7 +116,10 @@ def _intentar_extraer_desde_ring_buffer(
     """
     def _log(level: str, msg: str):
         if logger:
-            getattr(logger, level)(msg)
+            if hasattr(logger, level):
+                getattr(logger, level)(msg)
+            elif hasattr(logger, "info"):
+                logger.info(f"[{level.upper()}] {msg}")
 
     # 1. Obtener PROJECT_LOCAL_ROOT
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
@@ -326,7 +329,10 @@ def extraer_y_subir_evento(
 
     def _log(level: str, msg: str):
         if logger:
-            getattr(logger, level)(msg)
+            if hasattr(logger, level):
+                getattr(logger, level)(msg)
+            elif hasattr(logger, "info"):
+                logger.info(f"[{level.upper()}] {msg}")
 
     # ------------------------------------------------------------------
     # Resolver rutas
