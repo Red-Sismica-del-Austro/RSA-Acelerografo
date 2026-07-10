@@ -8,6 +8,7 @@
 # ============================================================
 
 # Conversión de datos sísmicos
+numpy<2.0.0
 obspy
 matplotlib
 
