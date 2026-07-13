@@ -80,8 +80,13 @@ class SignalPreprocessor:
             # pero calculamos los factores dinámicamente o alertamos.
             pass
 
+        # Asegurar conversión explícita a float64 antes de resamplear.
+        # Esto previene un bug de compatibilidad en la rutina C 'upfirdn' de SciPy en ARM/Raspberry Pi
+        # que devuelve ceros si el array de entrada es entero (int32).
+        samples_float = samples.astype(np.float64, copy=False)
+
         # up=2, down=5 para pasar de 250 Hz a 100 Hz
-        return resample_poly(samples, 2, 5, axis=0)
+        return resample_poly(samples_float, 2, 5, axis=0)
 
     def apply_filter(self, data: np.ndarray) -> np.ndarray:
         """
@@ -136,11 +141,15 @@ class SignalPreprocessor:
         """
         n_samples = window_raw_100hz.shape[0]
 
+        # Remover la media (demean) por canal para eliminar el offset DC masivo
+        # antes de filtrar. Esto evita transitorios gigantescos en el filtro IIR.
+        demeaned = window_raw_100hz - np.mean(window_raw_100hz, axis=0, keepdims=True)
+
         # 1. Aplicar filtro a toda la ventana acumulada
         if self._filter_enabled:
-            filtered = self.apply_filter(window_raw_100hz)
+            filtered = self.apply_filter(demeaned)
         else:
-            filtered = window_raw_100hz
+            filtered = demeaned
 
         # 2. Recortar la ventana de inferencia de 400 muestras (4 segundos)
         if n_samples == 800:
