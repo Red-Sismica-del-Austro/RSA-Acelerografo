@@ -743,13 +743,13 @@ class GPDStreamWorker:
 # Función principal (entry point del daemon)
 # ---------------------------------------------------------------------------
 
-def _configurar_logger(log_dir: str, station_id: str) -> logging.Logger:
+def _configurar_logger(log_dir: str, station_id: str, debug: bool = False) -> logging.Logger:
     """Configura un logger estándar para el worker cuando se ejecuta como script."""
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "gpd_stream_worker.log")
 
     logger = logging.getLogger(f"gpd_worker_{station_id}")
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
     if not logger.handlers:
         # Handler de archivo con rotación
@@ -786,6 +786,11 @@ def main() -> None:
         "--log-dir",
         default=None,
         help="Directorio de logs. Por defecto: PROJECT_LOCAL_ROOT/log-files/.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Habilitar logs de nivel DEBUG (por defecto es INFO).",
     )
     args = parser.parse_args()
 
@@ -828,10 +833,14 @@ def main() -> None:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "log-files")
         log_dir = os.path.normpath(log_dir)
 
-    logger = _configurar_logger(log_dir, station_id)
-
     # Extraer y completar configuración de la sección 'gpd'
     gpd_config = full_config.get("streaming", {}).get("gpd", {})
+
+    # Determinar si debug está activado vía argumento o archivo de configuración
+    debug_mode = args.debug or gpd_config.get("debug", False)
+
+    logger = _configurar_logger(log_dir, station_id, debug=debug_mode)
+
     if not gpd_config:
         logger.warning(
             "[GPD_INIT] Sección 'streaming.gpd' no encontrada en configuración. "

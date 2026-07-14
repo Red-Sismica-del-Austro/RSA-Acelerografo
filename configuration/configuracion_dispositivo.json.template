@@ -62,6 +62,7 @@
             "ventana_post_evento_s": 60,
             "auto_extract": true,
             "auto_upload": true,
+            "debug": false,
             "filtro": {
                 "habilitado": true,
                 "freq_min_hz": 3.0,
