@@ -42,6 +42,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from dotenv import load_dotenv
 
 import numpy as np
 
@@ -147,6 +148,11 @@ class GPDStreamWorker:
 
         # --- Modo de adquisición (online/offline) ---
         self._modo_adquisicion: str = config.get("modo_adquisicion", "online")
+
+        # --- Parámetros de MQTT (para el prefijo de tópicos de RSA) ---
+        self._mqtt_org: str = config.get("mqtt_org", "rsa")
+        self._mqtt_app: str = config.get("mqtt_app", "seismic")
+        self._mqtt_cap: str = config.get("mqtt_cap", "smart")
 
         # --- Logger de eventos CSV ---
         csv_dir = config.get("csv_dir", "/home/rsa/data/eventos-detectados")
@@ -315,10 +321,19 @@ class GPDStreamWorker:
 
         broker = self._config.get("mqtt_broker", "localhost")
         port = int(self._config.get("mqtt_port", 1883))
+        username = self._config.get("mqtt_username")
+        password = self._config.get("mqtt_password")
         client_id = f"gpd_worker_{self._station_id}_{os.getpid()}"
 
         try:
-            self._mqtt = mqtt_client.Client(client_id=client_id)
+            try:
+                self._mqtt = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2, client_id=client_id)
+            except AttributeError:
+                self._mqtt = mqtt_client.Client(client_id=client_id)
+
+            if username:
+                self._mqtt.username_pw_set(username, password)
+
             self._mqtt.connect(broker, port, keepalive=60)
             self._mqtt.loop_start()
             self._logger.info(f"[GPD_MQTT] Conectado al broker {broker}:{port} (client_id={client_id}).")
@@ -588,12 +603,12 @@ class GPDStreamWorker:
 
     def _publicar_mqtt(self, deteccion: dict) -> None:
         """
-        Publica la detección en el tópico MQTT <station_id>/events/detected.
+        Publica la detección en el tópico MQTT <org>/<app>/<cap>/<station_id>/events/detected.
 
         Si el cliente MQTT no está disponible, solo se registra en el log.
         """
         payload = json.dumps(deteccion, ensure_ascii=False)
-        topic = f"{self._station_id}/events/detected"
+        topic = f"{self._mqtt_org}/{self._mqtt_app}/{self._mqtt_cap}/{self._station_id}/events/detected"
 
         if self._mqtt is not None:
             try:
@@ -822,7 +837,17 @@ def main() -> None:
     with open(config_path, "r", encoding="utf-8") as f:
         full_config = json.load(f)
 
-    station_id = args.station or full_config.get("id", "UNKNOWN")
+    # Cargar variables de entorno desde el archivo .env si existe
+    env_path = None
+    if project_root:
+        env_path = os.path.join(project_root, "configuracion", ".env")
+    else:
+        env_path = os.path.normpath(os.path.join(script_dir, "..", "..", "..", "configuracion", ".env"))
+    
+    if env_path and os.path.exists(env_path):
+        load_dotenv(env_path)
+
+    station_id = args.station or full_config.get("dispositivo", {}).get("id", "UNKNOWN")
 
     # Resolver directorio de logs
     if args.log_dir:
@@ -852,9 +877,40 @@ def main() -> None:
     gpd_config["modo_adquisicion"] = (
         full_config.get("dispositivo", {}).get("modo_adquisicion", "online")
     )
+    
+    # Cargar credenciales y dirección del broker priorizando variables de entorno (.env)
     mqtt_cfg = full_config.get("mqtt", {})
-    gpd_config.setdefault("mqtt_broker", mqtt_cfg.get("broker", "localhost"))
-    gpd_config.setdefault("mqtt_port", mqtt_cfg.get("port", 1883))
+    broker_env = os.getenv("MQTT_BROKER")
+    port_env = os.getenv("MQTT_PORT")
+    username_env = os.getenv("MQTT_USERNAME")
+    password_env = os.getenv("MQTT_PASSWORD")
+
+    gpd_config["mqtt_broker"] = broker_env or gpd_config.get("mqtt_broker") or mqtt_cfg.get("broker") or "localhost"
+    gpd_config["mqtt_port"] = int(port_env) if port_env else (gpd_config.get("mqtt_port") or mqtt_cfg.get("port") or 1883)
+    gpd_config["mqtt_username"] = username_env or gpd_config.get("mqtt_username") or mqtt_cfg.get("username")
+    gpd_config["mqtt_password"] = password_env or gpd_config.get("mqtt_password") or mqtt_cfg.get("password")
+
+    # Intentar cargar configuracion_mqtt.json para extraer org, app y cap
+    mqtt_details_path = None
+    if project_root:
+        mqtt_details_path = os.path.join(project_root, "configuracion", "configuracion_mqtt.json")
+    else:
+        mqtt_details_path = os.path.normpath(os.path.join(script_dir, "..", "..", "..", "configuracion", "configuracion_mqtt.json"))
+
+    org, app, cap = "rsa", "seismic", "smart"
+    if mqtt_details_path and os.path.exists(mqtt_details_path):
+        try:
+            with open(mqtt_details_path, "r", encoding="utf-8") as f:
+                mqtt_details = json.load(f)
+                org = mqtt_details.get("org", "rsa")
+                app = mqtt_details.get("app", "seismic")
+                cap = mqtt_details.get("cap", "smart")
+        except Exception:
+            pass
+
+    gpd_config["mqtt_org"] = org
+    gpd_config["mqtt_app"] = app
+    gpd_config["mqtt_cap"] = cap
 
     # Verificar que GPD esté habilitado
     if not gpd_config.get("habilitado", True):
