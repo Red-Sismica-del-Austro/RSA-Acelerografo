@@ -76,7 +76,7 @@ def _parsear_archivo_generado(stdout: str) -> Optional[str]:
         match = re.search(r'Archivo:\s+(.+\.mseed)', linea)
         if match:
             return os.path.basename(match.group(1).strip())
-        return None
+    return None
 
 
 # ============================================================================
