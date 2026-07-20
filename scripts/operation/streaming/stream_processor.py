@@ -379,6 +379,31 @@ class StreamProcessor:
         )
 
     # -----------------------------------------------------------------------
+    # Mitigación del bug de fecha del dsPIC
+    # -----------------------------------------------------------------------
+
+    def _mitigar_fecha_dspic(self, ts_trama: datetime.datetime) -> datetime.datetime:
+        """
+        Corrige el timestamp de la trama si detecta que la fecha (año-mes-día)
+        tiene un retraso de 1 o más días respecto al reloj UTC de la Raspberry Pi.
+        Mantiene intactos la hora, minutos, segundos y microsegundos de la trama.
+        """
+        ahora_utc = datetime.datetime.utcnow()
+        diff_dias = (ahora_utc.date() - ts_trama.date()).days
+        if diff_dias >= 1:
+            self._logger.debug(
+                f"[DSPIC_BUG_MITIGATION] Corrigiendo fecha de trama: "
+                f"{ts_trama.strftime('%Y-%m-%d')} -> {ahora_utc.strftime('%Y-%m-%d')} "
+                f"| Hora original mantenida: {ts_trama.strftime('%H:%M:%S.%f')[:-3]}"
+            )
+            return ts_trama.replace(
+                year=ahora_utc.year,
+                month=ahora_utc.month,
+                day=ahora_utc.day
+            )
+        return ts_trama
+
+    # -----------------------------------------------------------------------
     # Procesamiento de trama individual
     # -----------------------------------------------------------------------
 
@@ -397,6 +422,8 @@ class StreamProcessor:
                 raw_frame,
                 usar_fecha_filename=False,  # No hay filename en el pipe
             )
+            # Aplicar mitigación dinámica si la fecha del dsPIC está desfasada
+            timestamp = self._mitigar_fecha_dspic(timestamp)
         except ValueError as e:
             self.frames_invalidos += 1
             self._logger.warning(
@@ -420,9 +447,11 @@ class StreamProcessor:
             if self._shm_publisher is not None:
                 try:
                     frame_data = decode_frame(raw_frame, usar_fecha_filename=False)
+                    # Aplicar mitigación antes de publicar en memoria compartida (SHM)
+                    ts_shm_corregido = self._mitigar_fecha_dspic(frame_data.timestamp)
                     self._shm_publisher.publish(
                         samples=frame_data.samples,
-                        timestamp=frame_data.timestamp.timestamp(),
+                        timestamp=ts_shm_corregido.timestamp(),
                         clock_source=frame_data.clock_source,
                     )
                 except Exception as e:

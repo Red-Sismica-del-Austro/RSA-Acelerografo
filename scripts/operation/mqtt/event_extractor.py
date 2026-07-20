@@ -326,6 +326,7 @@ def extraer_y_subir_evento(
             phase:        "extraction" | "upload" | "pipeline" (solo en error)
             message:      Descripción del resultado
     """
+    import time
 
     def _log(level: str, msg: str):
         if logger:
@@ -335,8 +336,34 @@ def extraer_y_subir_evento(
                 logger.info(f"[{level.upper()}] {msg}")
 
     # ------------------------------------------------------------------
-    # Resolver rutas
+    # Espera preventiva en tiempo real (si la ventana termina en el futuro)
     # ------------------------------------------------------------------
+    time_str = start.replace('Z', ' ').replace('T', ' ').strip()
+    try:
+        start_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f")
+    except ValueError:
+        try:
+            start_dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            start_dt = None
+
+    if start_dt is not None:
+        end_dt = start_dt + timedelta(seconds=duration)
+        ahora_utc = datetime.utcnow()
+        segundos_restantes = (end_dt - ahora_utc).total_seconds()
+        
+        if segundos_restantes > 0:
+            margen_seguridad = 3.0
+            tiempo_espera = segundos_restantes + margen_seguridad
+            # Limitar la espera máxima por seguridad
+            limite_espera = duration + 10.0
+            if tiempo_espera > limite_espera:
+                tiempo_espera = limite_espera
+                
+            _log("info", f"[EVENT_EXTRACTOR] El rango solicitado finaliza en el futuro real. "
+                         f"Esperando {tiempo_espera:.1f} segundos a que se completen los datos en adquisición...")
+            time.sleep(tiempo_espera)
+
     # ------------------------------------------------------------------
     # Resolver rutas
     # ------------------------------------------------------------------
