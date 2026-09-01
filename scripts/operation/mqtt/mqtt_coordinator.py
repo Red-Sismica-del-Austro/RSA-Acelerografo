@@ -4,7 +4,7 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import paho.mqtt.client as mqtt
 
@@ -13,11 +13,18 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from structured_logger import StructuredLogger
 
+# Importar orquestador de extracción de eventos
+from event_extractor import extraer_y_subir_evento
+
+# Importar EventLogger para registro CSV de detecciones sísmicas
+from core.event_logger import EventLogger
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIGURACIÓN Y CONSTANTES
 # ═══════════════════════════════════════════════════════════════════════════
 
 HEALTH_INTERVAL = 300    # segundos
+DAILY_REPUBLISH_HOUR = 0  # Hora para re-publicar estado diario (00:00)
 START_TIME = time.time()
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -54,6 +61,23 @@ def timestamp_iso() -> str:
     """Retorna timestamp actual en formato ISO8601 UTC."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def guardar_estado(estado: str, timestamp: str, state_file_path: str, logger: StructuredLogger):
+    """Guarda el estado y timestamp en un archivo JSON local, manteniendo los 3 estados."""
+    try:
+        data = {}
+        if os.path.exists(state_file_path) and os.path.getsize(state_file_path) > 0:
+            with open(state_file_path, 'r') as f:
+                data = json.load(f)
+        
+        # Actualizar solo el timestamp del estado correspondiente
+        data[estado] = timestamp
+        
+        with open(state_file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+        logger.info(f"[STATE_SAVE] Estado '{estado}' persistido localmente.")
+    except Exception as e:
+        logger.error(f"[STATE_SAVE_ERR] No se pudo guardar estado: {e}")
+
 # ═══════════════════════════════════════════════════════════════════════════
 # DISPATCHER DE COMANDOS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -61,14 +85,15 @@ def timestamp_iso() -> str:
 class CommandDispatcher:
     """Centraliza el manejo de comandos recibidos via MQTT."""
     
-    def __init__(self, config: dict, logger: StructuredLogger):
+    def __init__(self, config: dict, logger: StructuredLogger, event_logger=None):
         self.config = config
         self.logger = logger
+        self.event_logger = event_logger  # EventLogger para CSV de detecciones
         self.handlers = {
             "restart_acquisition": self._cmd_restart_acquisition,
             "cleanup_files": self._cmd_cleanup_files,
             "get_status": self._cmd_get_status,
-            # Agregar más comandos aquí
+            "extract_event": self._cmd_extract_event,
         }
     
     def dispatch(self, task_name: str, payload: dict, client) -> dict:
@@ -99,6 +124,107 @@ class CommandDispatcher:
             "timestamp": timestamp_iso()
         }
 
+    def _cmd_extract_event(self, payload: dict, client) -> None:
+        """
+        Extrae un evento sísmico y opcionalmente lo sube a Drive.
+
+        Publica un ACK inmediato ('accepted') y delega el pipeline
+        de extracción+subida a un hilo separado para no bloquear
+        el loop MQTT.
+
+        Payload esperado:
+            start (str, requerido):               Tiempo inicio ISO UTC con 'Z'
+            duration (float, requerido):           Duración en segundos
+            upload (bool, opcional, default True): Sube a Drive tras extraer
+            delete_after_upload (bool, opcional):  Borra local tras subida
+            request_id (str, opcional):            ID de rastreo
+
+        Returns:
+            None — la respuesta se publica manualmente en el hilo.
+        """
+        # Validar campos requeridos
+        start = payload.get("start")
+        duration = payload.get("duration")
+
+        if not start or duration is None:
+            res_topic = resolver_topico(self.config, "cmd_response", task_name="extract_event")
+            client.publish(res_topic, json.dumps({
+                "status": "error",
+                "message": "Campos requeridos: 'start' (str) y 'duration' (float)"
+            }), qos=1)
+            return None
+
+        request_id = payload.get("request_id", f"auto-{timestamp_iso()}")
+        upload = payload.get("upload", True)
+        delete_after = payload.get("delete_after_upload", False)
+
+        # ACK inmediato
+        res_topic = resolver_topico(self.config, "cmd_response", task_name="extract_event")
+        client.publish(res_topic, json.dumps({
+            "status": "accepted",
+            "request_id": request_id,
+            "timestamp": timestamp_iso(),
+            "message": "Extracción encolada"
+        }), qos=1)
+
+        self.logger.info(f"[EXTRACT_EVENT] Solicitud aceptada → request_id={request_id}, start={start}, duration={duration}s")
+
+        # Ejecutar pipeline en hilo separado
+        hilo = threading.Thread(
+            target=self._run_extraction_pipeline,
+            args=(client, request_id, start, duration, upload, delete_after),
+            daemon=True
+        )
+        hilo.start()
+
+        return None  # on_message verifica None antes de publicar
+
+    def _run_extraction_pipeline(self, client, request_id, start, duration, upload, delete_after):
+        """Pipeline de extracción + subida ejecutado en hilo separado."""
+        res_topic = resolver_topico(self.config, "cmd_response", task_name="extract_event")
+
+        try:
+            resultado = extraer_y_subir_evento(
+                start=start,
+                duration=duration,
+                upload=upload,
+                delete_after_upload=delete_after,
+                logger=self.logger
+            )
+            resultado["request_id"] = request_id
+            resultado["timestamp"] = timestamp_iso()
+            client.publish(res_topic, json.dumps(resultado), qos=1)
+
+            # Actualizar CSV si la extracción fue exitosa (disparada por comando de red externo)
+            if resultado.get("status") == "completed" and self.event_logger is not None:
+                archivo = resultado.get("output_file", "")
+                actualizado = self.event_logger.actualizar_confirmacion(
+                    timestamp_centro=start,
+                    confirmado=True,
+                    archivo_mseed=archivo,
+                )
+                if not actualizado:
+                    # No hay detección local previa → registrar como evento externo de red
+                    self.event_logger.registrar_evento_externo(
+                        timestamp_centro=start,
+                        archivo_mseed=archivo,
+                    )
+
+            self.logger.info(
+                f"[EXTRACT_EVENT] Pipeline finalizado → "
+                f"status={resultado['status']}, archivo={resultado.get('output_file')}"
+            )
+
+        except Exception as e:
+            self.logger.error(f"[EXTRACT_EVENT_ERR] Excepción inesperada en pipeline: {e}")
+            client.publish(res_topic, json.dumps({
+                "status": "error",
+                "request_id": request_id,
+                "timestamp": timestamp_iso(),
+                "phase": "pipeline",
+                "message": str(e)
+            }), qos=1)
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CORRELACIÓN DE EVENTOS (PLACEHOLDER)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -125,14 +251,16 @@ class EventCorrelator:
 # PUBLICACIÓN DE TELEMETRÍA
 # ═══════════════════════════════════════════════════════════════════════════
 
-def publicar_state(client, config: dict, estado: str, logger: StructuredLogger):
-    """Publica estado operacional (online/offline/on)."""
+def publicar_state(client, config: dict, estado: str, logger: StructuredLogger, timestamp_override: str = None):
+    """Publica estado operacional (online/offline/on). Retorna la información del mensaje (MQTTMessageInfo)."""
     topic = resolver_topico(config, "telemetry_state")
-    payload = {"status": estado, "timestamp": timestamp_iso()}
+    ts = timestamp_override if timestamp_override else timestamp_iso()
+    payload = {"status": estado, "timestamp": ts}
     qos = config["qos"]["telemetry"]
     retain = config["retain"]["telemetry_state"]
     result = client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
     logger.mqtt_publish(topic, "ok" if result.rc == 0 else "fail")
+    return result
 
 def obtener_metricas_hardware() -> dict:
     """Obtiene métricas de hardware de Raspberry Pi."""
@@ -216,6 +344,11 @@ def publicar_health(client, config: dict, logger: StructuredLogger):
 # CALLBACKS MQTT
 # ═══════════════════════════════════════════════════════════════════════════
 
+def on_publish(client, userdata, mid, *args, **kwargs):
+    """Callback invocado cuando el broker confirma la recepción (para QoS > 0)."""
+    # Delegamos la validación QoS 1 a la librería Paho-MQTT nativa
+    pass
+
 def on_connect(client, userdata, flags, rc, properties=None):
     """Callback de conexión al broker."""
     logger = userdata["logger"]
@@ -230,9 +363,33 @@ def on_connect(client, userdata, flags, rc, properties=None):
             client.subscribe(topic, qos=config["qos"].get("commands", 1))
             logger.mqtt_subscribe(topic, 1)
         
-        # Publicar estado online
-        publicar_state(client, config, "online", logger)
-        userdata["is_disconnected_logged"] = False
+        # Publicar estado online diferido si es el primer arranque
+        state_file = userdata["state_file_path"]
+        boot_ts = None
+        if not userdata["boot_published"]:
+            try:
+                if os.path.exists(state_file) and os.path.getsize(state_file) > 0:
+                    with open(state_file, 'r') as f:
+                        saved_data = json.load(f)
+                        boot_ts = saved_data.get("on")
+                
+                if boot_ts:
+                    logger.info(f"[BOOT_SYNC] Publicando estado 'on' diferido de {boot_ts}")
+                    publicar_state(client, config, "on", logger, timestamp_override=boot_ts)
+                
+                userdata["boot_published"] = True
+            except Exception as e:
+                logger.error(f"[BOOT_SYNC_ERR] Error leyendo {state_file}: {e}")
+
+        # Intentar publicar 'online'
+        now_ts = timestamp_iso()
+        msg_info = publicar_state(client, config, "online", logger, timestamp_override=now_ts)
+        
+        if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
+            logger.info(f"[CONNECT_SENT] Publish 'online' encolado (mid={msg_info.mid}). Delegando a Paho-MQTT.")
+            guardar_estado("online", now_ts, userdata["state_file_path"], logger)
+            userdata["last_state_change"] = now_ts
+            userdata["is_disconnected_logged"] = False
     else:
         logger.mqtt_error("connect", f"Código de error: {rc}")
 
@@ -244,7 +401,184 @@ def on_disconnect(client, userdata, flags, rc=None, properties=None):
     
     if real_rc != 0 and not userdata.get("is_disconnected_logged", False):
         logger.mqtt_disconnect(f"Inesperada, código: {real_rc}")
+        
+        # Reporte offline reactivo (inmediato)
+        now_ts = timestamp_iso()
+        guardar_estado("offline", now_ts, userdata["state_file_path"], logger)
+        userdata["last_state_change"] = now_ts
         userdata["is_disconnected_logged"] = True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HANDLER DE DETECCIÓN GPD LOCAL
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _manejar_deteccion_gpd_local(client, userdata: dict, payload: dict) -> None:
+    """
+    Maneja una detección GPD local publicada por gpd_stream_worker.
+
+    Solo actúa en modo ONLINE. En modo offline, el worker ya extrajo directamente
+    sin pasar por MQTT, por lo que este handler simplemente ignora el mensaje.
+
+    Flujo:
+    1. Validar payload (timestamp, type, probability).
+    2. Verificar modo de adquisición (solo actúa en 'online').
+    3. Verificar que auto_extract esté habilitado en configuración GPD.
+    4. Calcular rango de extracción: start = timestamp - ventana_pre, duration = pre + post.
+    5. Publicar ACK inmediato en cmd_response.
+    6. Lanzar _run_gpd_extraction_pipeline() en hilo separado.
+    """
+    logger = userdata["logger"]
+    device_config = userdata.get("device_config", {})
+    event_logger = userdata.get("event_logger")
+    config = userdata["config"]
+
+    # 1. Validar payload mínimo
+    timestamp_str = payload.get("timestamp")
+    phase_type = payload.get("type")
+    probability = payload.get("probability", 0.0)
+
+    if not timestamp_str or not phase_type:
+        logger.warning(
+            f"[GPD_LOCAL] Payload inválido (faltan 'timestamp' o 'type'): {payload}"
+        )
+        return
+
+    # 2. Verificar modo de adquisición — solo actuar en modo online
+    modo = device_config.get("dispositivo", {}).get("modo_adquisicion", "online")
+    if modo == "offline":
+        logger.info(
+            "[GPD_LOCAL] Modo offline — extracción gestionada por el worker directamente."
+        )
+        return
+
+    # 3. Verificar auto_extract en configuración GPD
+    gpd_config = device_config.get("streaming", {}).get("gpd", {})
+    if not gpd_config.get("auto_extract", True):
+        logger.info(
+            f"[GPD_LOCAL] auto_extract deshabilitado — detección {phase_type} "
+            f"(prob={probability}) registrada en CSV pero no extraída."
+        )
+        return
+
+    # 4. Calcular ventana de extracción
+    ventana_pre = int(gpd_config.get("ventana_pre_evento_s", 60))
+    ventana_post = int(gpd_config.get("ventana_post_evento_s", 60))
+    auto_upload = gpd_config.get("auto_upload", True)
+
+    try:
+        dt_centro = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+    except ValueError as exc:
+        logger.warning(f"[GPD_LOCAL] Timestamp inválido '{timestamp_str}': {exc}")
+        return
+
+    dt_start = dt_centro - timedelta(seconds=ventana_pre)
+    start_str = dt_start.strftime("%Y-%m-%dZ%H:%M:%S.%f")[:-3]
+    duration = ventana_pre + ventana_post
+    request_id = f"gpd-auto-{timestamp_str}"
+
+    logger.info(
+        f"[GPD_LOCAL_EXTRACT] Detección {phase_type} (prob={probability:.4f}) → "
+        f"start={start_str} duration={duration}s upload={auto_upload} req={request_id}"
+    )
+
+    # 5. ACK inmediato (trazabilidad en tópico de respuesta)
+    res_topic = resolver_topico(config, "cmd_response", task_name="extract_event")
+    client.publish(res_topic, json.dumps({
+        "status": "accepted",
+        "request_id": request_id,
+        "timestamp": timestamp_iso(),
+        "message": "Extracción GPD automática encolada",
+        "source": "gpd_auto",
+    }), qos=1)
+
+    # 6. Pipeline en hilo separado (no bloquea el loop MQTT)
+    hilo = threading.Thread(
+        target=_run_gpd_extraction_pipeline,
+        args=(client, userdata, request_id, start_str, duration,
+              auto_upload, timestamp_str, phase_type, event_logger),
+        daemon=True,
+    )
+    hilo.start()
+
+
+def _run_gpd_extraction_pipeline(
+    client,
+    userdata: dict,
+    request_id: str,
+    start: str,
+    duration: float,
+    upload: bool,
+    timestamp_centro: str,
+    phase_type: str,
+    event_logger,
+) -> None:
+    """
+    Pipeline de extracción GPD automática ejecutado en hilo separado.
+
+    Invoca extraer_y_subir_evento() y actualiza el CSV de detecciones:
+    - Si la extracción es exitosa, actualiza confirmado=True en el registro
+      que el worker GPD registró previamente (buscando por timestamp_centro).
+    - Si no encuentra el registro (condición de carrera improbable), registra
+      la detección como confirmada directamente.
+    """
+    logger = userdata["logger"]
+    config = userdata["config"]
+    res_topic = resolver_topico(config, "cmd_response", task_name="extract_event")
+
+    try:
+        resultado = extraer_y_subir_evento(
+            start=start,
+            duration=duration,
+            upload=upload,
+            delete_after_upload=False,
+            logger=logger,
+        )
+
+        resultado["request_id"] = request_id
+        resultado["timestamp"] = timestamp_iso()
+        resultado["source"] = "gpd_auto"
+        client.publish(res_topic, json.dumps(resultado), qos=1)
+
+        if resultado.get("status") == "completed" and event_logger is not None:
+            archivo = resultado.get("output_file", "")
+            # Actualizar el CSV: confirmar la detección del worker
+            actualizado = event_logger.actualizar_confirmacion(
+                timestamp_centro=timestamp_centro,
+                confirmado=True,
+                archivo_mseed=archivo,
+            )
+            if not actualizado:
+                # Condición de carrera improbable: worker aún no escribió en CSV.
+                # Registrar como confirmado directamente para no perder el evento.
+                event_logger.registrar_deteccion(
+                    timestamp_centro=timestamp_centro,
+                    fase=phase_type,
+                    probabilidad=0.0,
+                    confirmado=True,
+                    archivo_mseed=archivo,
+                    metodo="local_gpd",
+                )
+            logger.info(
+                f"[GPD_LOCAL_OK] Extracción GPD completada → "
+                f"archivo={archivo} req={request_id}"
+            )
+        elif resultado.get("status") != "completed":
+            logger.warning(
+                f"[GPD_LOCAL_FAIL] Extracción GPD fallida → {resultado.get('message')}"
+            )
+
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error(f"[GPD_LOCAL_ERROR] Excepción en pipeline GPD: {exc}")
+        client.publish(res_topic, json.dumps({
+            "status": "error",
+            "request_id": request_id,
+            "timestamp": timestamp_iso(),
+            "phase": "pipeline",
+            "source": "gpd_auto",
+            "message": str(exc),
+        }), qos=1)
+
 
 def on_message(client, userdata, msg):
     """Callback para mensajes recibidos."""
@@ -265,16 +599,22 @@ def on_message(client, userdata, msg):
         # Extraer nombre del comando del tópico
         task_name = topic.split("/cmd/")[-1]
         response = dispatcher.dispatch(task_name, payload, client)
-        
-        # Publicar respuesta
-        res_topic = resolver_topico(config, "cmd_response", task_name=task_name)
-        client.publish(res_topic, json.dumps(response), qos=1)
+
+        # Publicar respuesta solo si el handler no la publicó por sí mismo
+        # (los handlers que gestionan su propia publicación retornan None)
+        if response is not None:
+            res_topic = resolver_topico(config, "cmd_response", task_name=task_name)
+            client.publish(res_topic, json.dumps(response), qos=1)
         
     elif "/events/detected" in topic and config["id"] not in topic:
         # Evento de otra estación (correlación regional)
         station_id = topic.split("/")[3]  # Extraer ID de estación
         correlator.on_regional_event(station_id, payload)
-    
+
+    elif "/events/detected" in topic and config["id"] in topic:
+        # Detección GPD local — evaluar extracción automática (modo online)
+        _manejar_deteccion_gpd_local(client, userdata, payload)
+
     elif "/config/set" in topic:
         # Configuración dinámica (placeholder)
         logger.info(f"[CONFIG_SET] Recibido: {payload}")
@@ -283,18 +623,16 @@ def on_message(client, userdata, msg):
 # INICIALIZACIÓN Y LOOP PRINCIPAL
 # ═══════════════════════════════════════════════════════════════════════════
 
-def iniciar_cliente(config: dict, logger: StructuredLogger):
+def iniciar_cliente(config: dict, logger: StructuredLogger, userdata: dict):
     """Inicializa y configura el cliente MQTT."""
-    dispatcher = CommandDispatcher(config, logger)
+    event_logger = userdata.get("event_logger")
+    dispatcher = CommandDispatcher(config, logger, event_logger=event_logger)
     correlator = EventCorrelator(config, logger)
-    
-    userdata = {
-        "config": config,
-        "logger": logger,
+
+    userdata.update({
         "dispatcher": dispatcher,
         "correlator": correlator,
-        "is_disconnected_logged": False
-    }
+    })
     
     try:
         # Soporta Paho-MQTT v2.x con Callback API Version 2
@@ -305,6 +643,7 @@ def iniciar_cliente(config: dict, logger: StructuredLogger):
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
+    client.on_publish = on_publish
     
     # Configurar LWT
     lwt_topic = resolver_topico(config, "telemetry_state")
@@ -314,7 +653,19 @@ def iniciar_cliente(config: dict, logger: StructuredLogger):
     # Conectar
     broker = config["broker"]
     client.username_pw_set(broker["username"], broker["password"])
-    client.connect(broker["address"], broker["port"], keepalive=60)
+    
+    retry_delay = 2
+    while True:
+        try:
+            client.connect(broker["address"], broker["port"], keepalive=60)
+            break
+        except OSError as e:
+            if "101" in str(e) or e.errno == 101:
+                logger.warning(f"[NETWORK_ERR] Red inalcanzable (Errno 101). Reintentando en {retry_delay}s...")
+            else:
+                logger.warning(f"[NETWORK_ERR] Error de conexión OS: {e}. Reintentando en {retry_delay}s...")
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
     
     return client
 
@@ -342,15 +693,44 @@ def main():
     )
     logger.init({"component": "mqtt_coordinator", "version": "1.0.0"})
     
+    # Persistir estado 'on' inicial localmente
+    state_file = os.path.join(LOG_DIR, "mqtt_state.json")
+    now_ts = timestamp_iso()
+    guardar_estado("on", now_ts, state_file, logger)
+
+    # Cargar configuración del dispositivo (para parámetros GPD y modo_adquisicion)
+    device_config_path = os.path.join(
+        project_local_root, "configuracion", "configuracion_dispositivo.json"
+    )
+    device_config = {}
+    try:
+        with open(device_config_path, "r", encoding="utf-8") as f:
+            device_config = json.load(f)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning(f"[CONFIG] No se pudo cargar configuracion_dispositivo.json: {exc}")
+
+    # Inicializar EventLogger para registro CSV de detecciones
+    event_logger = EventLogger(logger=logger)
+
+    # Preparar userdata para el cliente
+    userdata = {
+        "config": config,
+        "logger": logger,
+        "device_config": device_config,
+        "event_logger": event_logger,
+        "state_file_path": state_file,
+        "boot_published": False,
+        "last_state_change": None,
+        "is_disconnected_logged": False
+    }
+    
     # Iniciar cliente
-    client = iniciar_cliente(config, logger)
+    client = iniciar_cliente(config, logger, userdata)
     client.loop_start()
     
-    # Publicar estado inicial
-    publicar_state(client, config, "on", logger)
-    
-    # Loop principal con timers de telemetría
+    # Loop principal con timers de telemetría y re-publicación diaria
     last_health = 0
+    last_day = datetime.now(timezone.utc).day
     
     try:
         while True:
@@ -359,6 +739,16 @@ def main():
             if now - last_health >= HEALTH_INTERVAL:
                 publicar_health(client, config, logger)
                 last_health = now
+            
+            # Re-publicación diaria a las 00:00
+            now_dt = datetime.now(timezone.utc)
+            if now_dt.day != last_day and now_dt.hour >= DAILY_REPUBLISH_HOUR:
+                last_change = userdata.get("last_state_change")
+                # Si no hay last_change (no conectó), no re-publicamos 'online'
+                if last_change:
+                    logger.info(f"[DAILY_SYNC] Re-publicando estado online (vía {last_change})")
+                    publicar_state(client, config, "online", logger, timestamp_override=last_change)
+                last_day = now_dt.day
             
             time.sleep(1)
             

@@ -181,14 +181,18 @@ int main(void)
         } 
         else 
         {
-        // El pipe ya existe, no es un error crítico
-        write_log("INFO", "Estado del pipe: Existente");
+            // El pipe ya existe, no es un error crítico
+            write_log("INFO", "Estado del pipe: Existente");
         } 
     }
     else
     {
         write_log("INFO", "Estado del pipe: Creado con exito");
     } 
+
+    // Asegurar que el pipe tenga permisos 0666 para lectura/escritura de otros usuarios
+    chmod(PIPE_NAME, 0666);
+
 
     // Bucle principal (modificado para permitir cierre limpio)
     while (!debe_terminar)

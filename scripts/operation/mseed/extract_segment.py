@@ -11,11 +11,24 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from obspy import read, UTCDateTime
 import re
-
+import json
 
 # ============================================================================
 # FUNCIONES AUXILIARES
 # ============================================================================
+
+# Lee un archivo de configuración en formato JSON y devuelve su contenido como un diccionario.
+def read_fileJSON(nameFile):
+    try:
+        with open(nameFile, 'r') as f:
+            data = json.load(f)
+        return data
+    except FileNotFoundError:
+        print(f"Archivo {nameFile} no encontrado.")
+        return None
+    except json.JSONDecodeError:
+        print(f"Error al decodificar el archivo {nameFile}.")
+        return None
 
 def parse_start_time(start_str):
     """
@@ -228,14 +241,27 @@ def main():
     # ============================================================================
     # CONFIGURACIÓN: Directorios por defecto
     # ============================================================================
-    # Variable de entorno
+    # Obtiene la variable de entorno para definir la ruta del archivo de configuración
     project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
     if not project_local_root:
         print("La variable de entorno PROJECT_LOCAL_ROOT no está definida.")
         return 1
 
-    default_input_dir = os.path.join(project_local_root, "resultados", "mseed")
-    default_output_dir = os.path.join(project_local_root, "resultados", "eventos-extraidos")
+    # Definir rutas de archivos y directorios
+    config_dispositivo_file = os.path.join(project_local_root, "configuracion", "configuracion_dispositivo.json")
+
+    # Lee el archivo de configuración del dispositivo
+    config_dispositivo = read_fileJSON(config_dispositivo_file)
+    if config_dispositivo is None:
+        print("No se pudo leer el archivo de configuración del dispositivo. Terminando el programa.")
+        return
+
+    # Obtener rutas desde configuracion_dispositivo.json
+    default_input_dir = config_dispositivo.get("directorios", {}).get("archivos_mseed", "")
+    default_output_dir = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "")
+    
+    #default_input_dir = os.path.join(project_local_root, "resultados", "mseed")
+    #default_output_dir = os.path.join(project_local_root, "resultados", "eventos-extraidos")
 
     parser = argparse.ArgumentParser(
         description="Extrae un segmento temporal de archivos miniSEED organizados por fecha.",

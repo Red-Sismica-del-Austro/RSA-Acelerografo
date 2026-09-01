@@ -13,56 +13,28 @@ sudo make check
 sudo make install
 
 # Instalacion ibjansson:
-sudo apt-get install libjansson-dev
+sudo apt-get install -y libjansson-dev
 
-# Instalacion libreria paho-mqtt
-sudo pip3 install paho-mqtt
+# Instalacion de python3-venv (necesario para entornos virtuales)
+sudo apt-get install -y python3-venv
 
-# Instalacion libreria Google Drive API
-sudo pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
-sudo pip3 install --upgrade oauth2client
+# Instalacion de paquetes pesados precompilados via apt
+# (se heredan al venv con --system-site-packages)
+sudo apt-get install -y \
+    python3-pip python3-dev \
+    python3-numpy python3-scipy python3-matplotlib \
+    python3-lxml python3-setuptools python3-sqlalchemy \
+    python3-decorator python3-requests python3-packaging \
+    libatlas-base-dev libopenblas-dev gfortran
 
 # Instalacion de Supervisor
-sudo apt-get install supervisor
+sudo apt-get install -y supervisor
 
 # Instalacion de NTP
 sudo apt install ntp -y
 sudo apt install ntpstat -y
 
-# Instalacion de Obspy
-while true; do
-    read -p "Desea continuar con la instalación de ObsPy? (s/n) " response
-    case "$response" in
-        s|S)
-            echo "Instalando dependencias necesarias..."
-            sudo apt-get install -y \
-                python3-pip python3-dev \
-                python3-scipy python3-lxml python3-setuptools \
-                python3-sqlalchemy python3-decorator python3-requests \
-                python3-packaging python3-pyproj python3-pytest \
-                python3-geographiclib python3-cartopy python3-pyshp \
-                libatlas-base-dev libopenblas-dev gfortran
-
-            echo "Actualizando pip..."
-            sudo pip3 install --upgrade pip
-
-            echo "Actualizando NumPy y Matplotlib..."
-            sudo pip3 install --upgrade numpy matplotlib
-
-            echo "Instalando ObsPy..."
-            sudo pip3 install obspy
-
-            echo "Comprobando instalación de ObsPy..."
-            python3 -c "import obspy; print(obspy.__version__)"
-
-            break  # Salir del bucle después de la instalación
-            ;;
-        n|N)
-            echo "Instalación de ObsPy cancelada."
-            break  # Salir del bucle sin instalar
-            ;;
-        *)
-            echo "Opción no válida, por favor ingrese 's' para sí o 'n' para no."
-            ;;
-    esac
-done
+# Crear el entorno virtual e instalar dependencias Python
+# (hereda numpy/scipy/matplotlib de apt, instala obspy/paho-mqtt/etc via pip)
+echo "Creando entorno virtual e instalando dependencias Python..."
+bash $PROJECT_GIT_ROOT/scripts/setup/crear_entorno_virtual.sh

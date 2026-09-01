@@ -25,6 +25,7 @@ mkdir -p $PROJECT_LOCAL_ROOT/scripts/mseed
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/mqtt
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/drive
 mkdir -p $PROJECT_LOCAL_ROOT/scripts/task
+mkdir -p $PROJECT_LOCAL_ROOT/scripts/web
 
 # Asegurar que los directorios creados tengan la propiedad correcta (sin sudo)
 chown -R $USER:$USER $PROJECT_LOCAL_ROOT
@@ -40,31 +41,42 @@ touch $PROJECT_LOCAL_ROOT/log-files/mqtt.log
 touch $PROJECT_LOCAL_ROOT/log-files/mseed.log
 touch $PROJECT_LOCAL_ROOT/log-files/registro_continuo.log
 
-# Copiar los archivos de configuración del proyecto en Git al proyecto local
-cp $PROJECT_GIT_ROOT/configuration/configuracion_dispositivo.json $PROJECT_LOCAL_ROOT/configuracion/
-cp $PROJECT_GIT_ROOT/configuration/configuracion_mqtt.json $PROJECT_LOCAL_ROOT/configuracion/
-cp $PROJECT_GIT_ROOT/configuration/configuracion_mseed.json $PROJECT_LOCAL_ROOT/configuracion/
+# Copiar la configuración maestra y las plantillas al proyecto local
+cp $PROJECT_GIT_ROOT/configuration/configuracion_maestra.json $PROJECT_LOCAL_ROOT/configuracion/
+cp $PROJECT_GIT_ROOT/configuration/*.template $PROJECT_LOCAL_ROOT/configuracion/
+
+# Ejecutar la hidratación de la configuración
+PROJECT_GIT_ROOT=$PROJECT_GIT_ROOT PROJECT_LOCAL_ROOT=$PROJECT_LOCAL_ROOT python3 $PROJECT_GIT_ROOT/scripts/setup/hidratar_configuracion.py
 
 # Copiar los scripts de Python del proyecto en Git al proyecto local
 cp $PROJECT_GIT_ROOT/scripts/operation/structured_logger.py $PROJECT_LOCAL_ROOT/scripts/structured_logger.py
-cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/cliente.py $PROJECT_LOCAL_ROOT/scripts/mqtt/cliente.py
-cp $PROJECT_GIT_ROOT/scripts/operation/mseed/binary_to_mseed.py $PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py
-cp $PROJECT_GIT_ROOT/scripts/operation/mseed/extract_segment.py $PROJECT_LOCAL_ROOT/scripts/mseed/extract_segment.py
-cp $PROJECT_GIT_ROOT/scripts/operation/drive/gestor_archivos_acq.py $PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py
-cp $PROJECT_GIT_ROOT/scripts/operation/drive/subir_archivo.py $PROJECT_LOCAL_ROOT/scripts/drive/subir_archivo.py
+cp $PROJECT_GIT_ROOT/scripts/operation/mqtt/*.py $PROJECT_LOCAL_ROOT/scripts/mqtt/
+cp $PROJECT_GIT_ROOT/scripts/operation/mseed/*.py $PROJECT_LOCAL_ROOT/scripts/mseed/
+cp $PROJECT_GIT_ROOT/scripts/operation/drive/*.py $PROJECT_LOCAL_ROOT/scripts/drive/
+cp -r $PROJECT_GIT_ROOT/scripts/operation/web/. $PROJECT_LOCAL_ROOT/scripts/web/
+
+# Crear el entorno virtual e instalar dependencias Python
+echo "Configurando entorno virtual Python..."
+bash $PROJECT_GIT_ROOT/scripts/setup/crear_entorno_virtual.sh
 
 # Copiar el task-script crontab.txt al directorio de proyectos
-cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/scripts/task/
+cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/configuracion/
 cp $PROJECT_GIT_ROOT/scripts/task/crontab.txt $PROJECT_LOCAL_ROOT/tmp-files/crontab_backup.txt 
 
 # Copiar los archivos de configuracion de Supervisor al directorio de configuracion (procesando placeholders)
 sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" $PROJECT_GIT_ROOT/scripts/task/mqtt_coordinator.conf > $PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf
 sudo cp $PROJECT_LOCAL_ROOT/tmp-files/mqtt_coordinator.conf /etc/supervisor/conf.d/
 
+sed -e "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" \
+    -e "s|{{PROJECT_GIT_ROOT}}|$PROJECT_GIT_ROOT|g" \
+    $PROJECT_GIT_ROOT/scripts/task/config_server.conf > $PROJECT_LOCAL_ROOT/tmp-files/config_server.conf
+sudo cp $PROJECT_LOCAL_ROOT/tmp-files/config_server.conf /etc/supervisor/conf.d/
+
 # Actualizar Supervisor
 sudo supervisorctl reread
 sudo supervisorctl update
 sudo supervisorctl start mqtt_coordinator
+sudo supervisorctl start config_server
 
 # Copiar los task-scripts al directorio /usr/local/bin sin la extensión .sh
 for script in $PROJECT_GIT_ROOT/scripts/task/*.sh; do

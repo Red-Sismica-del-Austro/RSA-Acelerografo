@@ -27,6 +27,7 @@ uname -v = #1642 SMP Mon Apr  3 17:20:52 BST 2023
 /usr/bin/oslevel       = unknown
 /bin/universe          = unknown
 
+PATH: /home/rsa/.local/bin
 PATH: /usr/local/sbin
 PATH: /usr/local/bin
 PATH: /usr/sbin
@@ -205,8 +206,10 @@ config.status:848: creating Makefile
 config.status:848: creating src/Makefile
 config.status:848: creating doc/Makefile
 config.status:848: creating config.h
+config.status:1029: config.h is unchanged
 config.status:1077: executing depfiles commands
 config.status:1154: cd src       && sed -e '/# am--include-marker/d' Makefile         | make -f - am--depfiles
+make: Nothing to be done for 'am--depfiles'.
 config.status:1159: $? = 0
 
 ## ---------------- ##

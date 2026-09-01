@@ -1,0 +1,33 @@
+# ============================================================
+# Dependencias Python del proyecto Acelerógrafo
+# ============================================================
+# Las librerías pesadas (numpy, scipy) se instalan via pip
+# como dependencia de obspy. matplotlib también se instala via
+# pip porque la versión de apt (3.3.4) no es compatible con
+# numpy 2.x que requiere obspy.
+# ============================================================
+
+# Conversión de datos sísmicos
+numpy<2.0.0
+obspy
+matplotlib
+
+# Subida a Google Drive
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+oauth2client
+
+# Compatibilidad OpenSSL (la versión de apt es incompatible con
+# la versión de cryptography que instala google-auth)
+pyopenssl
+
+# MQTT
+paho-mqtt
+python-dotenv
+
+# Machine Learning (inferencia con TensorFlow Lite)
+tflite-runtime
+
+# Panel web de configuración
+flask

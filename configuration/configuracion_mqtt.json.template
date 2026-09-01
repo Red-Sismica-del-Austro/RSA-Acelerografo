@@ -1,0 +1,36 @@
+{
+    "id": "{{ESTACION_ID}}",
+    "org": "rsa",
+    "app": "seismic",
+    "cap": "smart",
+    "topics": {
+        "telemetry_state": "{org}/{app}/{cap}/{id}/telemetry/state",
+        "telemetry_health": "{org}/{app}/{cap}/{id}/telemetry/health",
+        "events_heartbeat": "{org}/{app}/{cap}/{id}/events/heartbeat",
+        "events_local": "{org}/{app}/{cap}/{id}/events/detected",
+        "events_regional": "{org}/{app}/{cap}/+/events/detected",
+        "cmd_execute": "{org}/{app}/{cap}/{id}/cmd/+",
+        "cmd_broadcast": "{org}/{app}/{cap}/broadcast/cmd/+",
+        "cmd_response": "{org}/{app}/{cap}/{id}/cmd/{task_name}/res",
+        "config_set": "{org}/{app}/{cap}/{id}/config/set"
+    },
+    "subscriptions": [
+        "events_regional",
+        "cmd_execute",
+        "cmd_broadcast",
+        "config_set",
+        "events_local"
+    ],
+    "qos": {
+        "telemetry": 1,
+        "events": 1,
+        "commands": 1,
+        "config": 1
+    },
+    "retain": {
+        "telemetry_state": true,
+        "telemetry_health": false,
+        "events_local": false,
+        "cmd_response": false
+    }
+}

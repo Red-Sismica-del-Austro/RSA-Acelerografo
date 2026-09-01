@@ -103,6 +103,10 @@ class StructuredLogger:
             # Llamada con dos argumentos (estilo estructurado)
             self._log_structured("SUMMARY", "ERROR", None, {"operation": operation, "error": error})
 
+    def debug(self, msg):
+        if self._should_log("DEBUG"):
+            self.logger.debug(msg)
+
     def info(self, msg):
         if self._should_log("INFO"):
             self.logger.info(msg)
@@ -158,3 +162,65 @@ class StructuredLogger:
     def mqtt_error(self, operation: str, error: str):
         """[MQTT_ERROR] Error en operación MQTT"""
         self._log_structured("SUMMARY", "MQTT_ERROR", operation, {"error": error})
+
+    # --- Métodos específicos para Streaming y Ring Buffer ---
+
+    def ring_write(self, filename: str, frame_count: int):
+        """[RING_WRITE] Trama escrita al ring buffer"""
+        self._log_structured("DEBUG", "RING_WRITE", filename, {"frames": frame_count})
+
+    def ring_rotate(self, old_file: str, new_file: str):
+        """[RING_ROTATE] Rotación de archivo del ring buffer"""
+        self._log_structured("INFO", "RING_ROTATE", old_file, {"new": new_file})
+
+    def ring_cleanup(self, deleted_count: int, freed_mb: float):
+        """[RING_CLEANUP] Limpieza por política de retención"""
+        self._log_structured("SUMMARY", "RING_CLEANUP", None, {"deleted": deleted_count, "freed_mb": f"{freed_mb:.1f}"})
+
+    def ring_query(self, start: str, end: str, frames_found: int):
+        """[RING_QUERY] Consulta al ring buffer"""
+        self._log_structured("INFO", "RING_QUERY", None, {"start": start, "end": end, "frames": frames_found})
+
+    def pipe_read(self, status: str, details: str = None):
+        """[PIPE_READ] Estado de lectura del named pipe"""
+        self._log_structured("DEBUG", "PIPE_READ", None, {"status": status, "details": details})
+
+    def pipe_error(self, error: str):
+        """[PIPE_ERROR] Error en lectura del named pipe"""
+        self._log_structured("SUMMARY", "PIPE_ERROR", None, {"error": error})
+
+    # --- Métodos específicos para Inferencia GPD ---
+
+    def gpd_load(self, model_path: str, load_time_s: float):
+        """[GPD_LOAD] Modelo TFLite cargado correctamente"""
+        self._log_structured("SUMMARY", "GPD_LOAD", model_path, {"load_time": f"{load_time_s:.2f}s"})
+
+    def gpd_inference(self, prob_noise: float, prob_p: float, prob_s: float):
+        """[GPD_INFERENCE] Resultado de inferencia (solo en modo DEBUG)"""
+        self._log_structured("DEBUG", "GPD_INFERENCE", None, {
+            "noise": f"{prob_noise:.3f}", "P": f"{prob_p:.3f}", "S": f"{prob_s:.3f}"
+        })
+
+    def gpd_detection(self, phase_type: str, probability: float, timestamp: str):
+        """[GPD_DETECTION] Fase sísmica detectada por el modelo GPD"""
+        self._log_structured("SUMMARY", "GPD_DETECTION", phase_type, {
+            "prob": f"{probability:.4f}", "timestamp": timestamp
+        })
+
+    def gpd_cooldown(self, remaining_s: float):
+        """[GPD_COOLDOWN] Detección ignorada porque el cooldown sigue activo"""
+        self._log_structured("DEBUG", "GPD_COOLDOWN", None, {"remaining_s": f"{remaining_s:.1f}"})
+
+    def gpd_error(self, operation: str, error: str):
+        """[GPD_ERROR] Error en el pipeline de inferencia GPD"""
+        self._log_structured("SUMMARY", "GPD_ERROR", operation, {"error": error})
+
+    def gpd_csv_write(self, csv_file: str, timestamp_centro: str):
+        """[GPD_CSV_WRITE] Detección registrada en CSV mensual"""
+        self._log_structured("INFO", "GPD_CSV_WRITE", csv_file, {"ts": timestamp_centro})
+
+    def gpd_csv_update(self, csv_file: str, timestamp_centro: str, confirmado: bool):
+        """[GPD_CSV_UPDATE] Registro actualizado en CSV mensual (confirmación de extracción)"""
+        self._log_structured("INFO", "GPD_CSV_UPDATE", csv_file, {
+            "ts": timestamp_centro, "confirmado": str(confirmado)
+        })

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Configuración — Acelerógrafo RSA</title>
+    <meta name="description" content="Panel de administración para configurar la estación acelerográfica de la Red Sísmica del Austro.">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+
+    <!-- ===== ENCABEZADO ===== -->
+    <header class="app-header">
+        <div class="header-inner">
+            <div class="header-brand">
+                <div class="brand-icon" aria-hidden="true">🌍</div>
+                <div class="brand-text">
+                    <span class="brand-name">Red Sísmica del Austro</span>
+                    <span class="brand-sub">Panel de Configuración de Estación</span>
+                </div>
+            </div>
+            <div class="header-status">
+                <div class="status-badge" id="badge-rc" title="Servicio de registro continuo">
+                    <span class="status-dot"></span>
+                    <span class="status-label">registro_continuo</span>
+                </div>
+                <div class="status-badge" id="badge-mqtt" title="Coordinador MQTT">
+                    <span class="status-dot"></span>
+                    <span class="status-label">mqtt_coordinator</span>
+                </div>
+                <div class="station-chip" id="station-chip">—</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ===== CONTENIDO PRINCIPAL ===== -->
+    <main class="app-main">
+
+        <!-- Banner de alerta global -->
+        <div id="global-alert" class="global-alert hidden" role="alert" aria-live="assertive"></div>
+
+        <!-- Indicador de carga inicial -->
+        <div id="loading-overlay" class="loading-overlay" aria-label="Cargando configuración...">
+            <div class="spinner"></div>
+            <p>Cargando configuración...</p>
+        </div>
+
+        <form id="config-form" class="config-form hidden" novalidate autocomplete="off">
+
+            <!-- ── Sección: Identificación de la Estación ── -->
+            <section class="form-section" aria-labelledby="sec-estacion">
+                <h2 id="sec-estacion" class="section-title">
+                    <span class="section-icon" aria-hidden="true">📍</span>
+                    Identificación de la Estación
+                </h2>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <label for="estacion_id" class="field-label">
+                            Código de Estación
+                            <span class="field-required" aria-label="campo obligatorio">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            id="estacion_id"
+                            name="estacion_id"
+                            class="field-input field-mono"
+                            maxlength="4"
+                            placeholder="NOM0"
+                            pattern="^[A-Z0-9]{4}$"
+                            required
+                            autocomplete="off"
+                            aria-describedby="estacion_id-hint"
+                        >
+                        <span id="estacion_id-hint" class="field-hint">4 caracteres alfanuméricos en mayúsculas. Ej: NOM0, ABCD</span>
+                    </div>
+                    <div class="field-group">
+                        <label for="nombre" class="field-label">
+                            Nombre Completo (MAYÚSCULAS)
+                            <span class="field-required" aria-label="campo obligatorio">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            id="nombre"
+                            name="nombre"
+                            class="field-input"
+                            maxlength="200"
+                            placeholder="Ej: CHANLUD CIMA"
+                            pattern="^[A-ZÁÉÍÓÚÑ0-9\s,\.\-_]+$"
+                            required
+                            autocomplete="off"
+                            aria-describedby="nombre-hint"
+                        >
+                        <span id="nombre-hint" class="field-hint">Todo en letras mayúsculas. Ej: CHANLUD CIMA</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── Sección: Coordenadas Geográficas ── -->
+            <section class="form-section" aria-labelledby="sec-coords">
+                <h2 id="sec-coords" class="section-title">
+                    <span class="section-icon" aria-hidden="true">🗺️</span>
+                    Coordenadas Geográficas
+                </h2>
+                <div class="form-grid form-grid-3">
+                    <div class="field-group">
+                        <label for="latitud" class="field-label">
+                            Latitud (°)
+                            <span class="field-required" aria-label="campo obligatorio">*</span>
+                        </label>
+                        <input
+                            type="number"
+                            id="latitud"
+                            name="latitud"
+                            class="field-input"
+                            step="0.000001"
+                            min="-90"
+                            max="90"
+                            placeholder="-2.890000"
+                            required
+                        >
+                        <span class="field-hint">Entre -90 y 90</span>
+                    </div>
+                    <div class="field-group">
+                        <label for="longitud" class="field-label">
+                            Longitud (°)
+                            <span class="field-required" aria-label="campo obligatorio">*</span>
+                        </label>
+                        <input
+                            type="number"
+                            id="longitud"
+                            name="longitud"
+                            class="field-input"
+                            step="0.000001"
+                            min="-180"
+                            max="180"
+                            placeholder="-79.000000"
+                            required
+                        >
+                        <span class="field-hint">Entre -180 y 180</span>
+                    </div>
+                    <div class="field-group">
+                        <label for="altitud" class="field-label">
+                            Altitud (m s.n.m.)
+                            <span class="field-required" aria-label="campo obligatorio">*</span>
+                        </label>
+                        <input
+                            type="number"
+                            id="altitud"
+                            name="altitud"
+                            class="field-input"
+                            step="1"
+                            min="0"
+                            placeholder="2500"
+                            required
+                        >
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── Sección: Parámetros de Adquisición ── -->
+            <section class="form-section" aria-labelledby="sec-adq">
+                <h2 id="sec-adq" class="section-title">
+                    <span class="section-icon" aria-hidden="true">⚙️</span>
+                    Parámetros de Adquisición
+                </h2>
+                <div class="form-grid form-grid-2">
+                    <div class="field-group">
+                        <label for="fuente_reloj" class="field-label">Fuente de Reloj</label>
+                        <select id="fuente_reloj" name="fuente_reloj" class="field-input field-select">
+                            <option value="0">0 — Raspberry Pi (reloj del sistema)</option>
+                            <option value="1">1 — GPS externo</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="modo_adquisicion" class="field-label">Modo de Adquisición</label>
+                        <select id="modo_adquisicion" name="modo_adquisicion" class="field-input field-select">
+                            <option value="offline">offline — Solo almacenamiento local</option>
+                            <option value="online">online — Con subida a Google Drive</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="deteccion_eventos" class="field-label">Detección de Eventos (STA/LTA)</label>
+                        <select id="deteccion_eventos" name="deteccion_eventos" class="field-input field-select">
+                            <option value="no">no — Desactivada</option>
+                            <option value="si">si — Activada</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="publicar_eventos" class="field-label">Publicar Eventos por MQTT</label>
+                        <select id="publicar_eventos" name="publicar_eventos" class="field-input field-select">
+                            <option value="no">no — No publicar</option>
+                            <option value="si">si — Publicar</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+
+
+            <!-- ── Barra de Acciones ── -->
+            <div class="actions-bar">
+                <button type="button" id="btn-reset" class="btn btn-secondary">
+                    Descartar Cambios
+                </button>
+                <button type="submit" id="btn-apply" class="btn btn-primary">
+                    <span class="btn-icon" aria-hidden="true">✓</span>
+                    Aplicar Configuración
+                </button>
+            </div>
+
+        </form>
+
+        <!-- Modal de confirmación -->
+        <div id="confirm-modal" class="modal-overlay hidden" role="dialog"
+             aria-modal="true" aria-labelledby="modal-title">
+            <div class="modal-box">
+                <h3 id="modal-title" class="modal-title">⚠️ Confirmar cambios</h3>
+                <p class="modal-body">
+                    Aplicar la configuración reiniciará los servicios del acelerógrafo
+                    (<strong>registro_continuo</strong> y <strong>mqtt_coordinator</strong>).
+                    Esto interrumpirá momentáneamente la adquisición de datos.
+                </p>
+                <div id="modal-diff" class="modal-diff"></div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-modal-cancel" class="btn btn-secondary">Cancelar</button>
+                    <button type="button" id="btn-modal-confirm" class="btn btn-danger">
+                        Confirmar y Reiniciar Servicios
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SECCIÓN DE DIAGNÓSTICO (independiente del formulario) ===== -->
+        <div class="diagnostico-section" id="diagnostico-section">
+            <div class="diagnostico-header">
+                <h2 class="diagnostico-title">
+                    <span aria-hidden="true">🔍</span>
+                    Diagnóstico del Registro
+                </h2>
+                <button type="button" id="btn-check" class="btn btn-info">
+                    <span class="btn-icon" aria-hidden="true">▶</span>
+                    Comprobar
+                </button>
+            </div>
+            <!-- Contenedor de datos parseados (oculto hasta presionar Comprobar) -->
+            <div id="check-output" class="hidden" aria-live="polite"></div>
+        </div>
+
+    </main>
+
+    <!-- ===== PIE DE PÁGINA ===== -->
+    <footer class="app-footer">
+        <p>Red Sísmica del Austro (RSA) — Panel de Configuración de Estación Acelerográfica</p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+

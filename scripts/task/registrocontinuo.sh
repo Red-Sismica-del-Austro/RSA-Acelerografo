@@ -3,6 +3,9 @@
 # Cargar las variables de entorno
 source /usr/local/bin/project_paths
 
+# Definir el Python del entorno virtual
+VENV_PYTHON="$PROJECT_LOCAL_ROOT/.venv/bin/python3"
+
 # Función para verificar si un proceso está ejecutándose
 is_running() {
   pgrep -f "$1" > /dev/null 2>&1
@@ -23,11 +26,11 @@ case "$1" in
     
     # 2. Ejecutar conversión binary_to_mseed (esperar a que termine)
     echo "Ejecutando conversión a miniSEED..."
-    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py" 1
+    "$VENV_PYTHON" "$PROJECT_LOCAL_ROOT/scripts/mseed/binary_to_mseed.py" 1
     
     # 3. Ejecutar gestor de archivos
     echo "Ejecutando gestor de archivos..."
-    /usr/bin/python3 "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py" &
+    "$VENV_PYTHON" "$PROJECT_LOCAL_ROOT/scripts/drive/gestor_archivos_acq.py" &
     ;;
   
   stop)
