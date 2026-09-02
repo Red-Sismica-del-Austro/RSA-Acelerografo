@@ -15,12 +15,12 @@ is_running() {
 # Dependiendo de los parámetros que se le pasen al programa se usa una opción u otra
 case "$1" in
   start)
-    # 1. Verificar/iniciar registro_continuo
-    if is_running "/scripts/acelerografo/ejecutables/registro_continuo"; then
-      echo "registro_continuo ya está ejecutándose"
+    # 1. Verificar/iniciar registro_continuo via systemd
+    if systemctl is-active --quiet rsa-acelerografo.service; then
+      echo "registro_continuo ya está ejecutándose (systemd)"
     else
-      echo "Iniciando registro_continuo..."
-      sudo -E "$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/registro_continuo" &
+      echo "Iniciando registro_continuo via systemd..."
+      sudo systemctl start rsa-acelerografo.service
       sleep 3
     fi
     
@@ -35,7 +35,7 @@ case "$1" in
   
   stop)
     echo "Deteniendo sistema de registro continuo..."
-    sudo killall -q registro_continuo
+    sudo systemctl stop rsa-acelerografo.service
     pkill -f binary_to_mseed.py 2>/dev/null
     pkill -f gestor_archivos_acq.py 2>/dev/null
     sudo "$PROJECT_LOCAL_ROOT/scripts/acelerografo/ejecutables/reset_master"

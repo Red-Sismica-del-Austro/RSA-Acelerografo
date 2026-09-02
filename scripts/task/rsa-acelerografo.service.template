@@ -1,0 +1,37 @@
+[Unit]
+Description=RSA Acelerógrafo - Registro Continuo (Adquisición SPI)
+Documentation=https://github.com/RSA-Acelerografo
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/
+
+# 1. Limpieza del FIFO residual antes de cada arranque
+ExecStartPre=/bin/rm -f /tmp/my_pipe
+
+# 2. Reseteo por hardware del microcontrolador dsPIC33 (pulso MCLR y TEST)
+ExecStartPre={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/reset_master
+
+# Ejecutable compilado de adquisición continua
+ExecStart={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/registro_continuo
+
+# Auto-reinicio ante cualquier código de salida
+Restart=always
+RestartSec=5
+
+# Limpieza del FIFO al detenerse
+ExecStopPost=/bin/rm -f /tmp/my_pipe
+
+# Variables de entorno
+Environment=PROJECT_LOCAL_ROOT={{PROJECT_LOCAL_ROOT}}
+
+# Timeout y señal de terminación
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
