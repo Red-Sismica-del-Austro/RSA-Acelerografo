@@ -58,6 +58,7 @@ DEFAULT_BUFFER_DIR = "/home/rsa/data/ring-buffer/"
 DEFAULT_MAX_SIZE_MB = 500
 DEFAULT_ARCHIVO_DURACION_S = 300   # 5 minutos por archivo
 DEFAULT_USAR_FECHA_FILENAME = True  # Usa fecha del nombre del archivo (mitiga bug dsPIC)
+DEFAULT_PIPE_RETRY_MAX_S = 120     # Segundos máximos de espera para el pipe al arrancar
 
 # Timeout de lectura: si no llegan datos en N segundos, logear una advertencia.
 # Con 250 Hz y 1 trama/seg, lo normal es recibir 1 trama por segundo.
@@ -145,6 +146,7 @@ class StreamProcessor:
         shm_habilitado: bool = True,
         shm_path: str = "",
         dry_run: bool = False,
+        pipe_retry_max_s: float = DEFAULT_PIPE_RETRY_MAX_S,
         logger: Optional[logging.Logger] = None,
     ):
         """
@@ -159,6 +161,7 @@ class StreamProcessor:
             shm_path:            Ruta del archivo de memoria compartida.
             dry_run:             Si True, lee del pipe pero NO escribe al buffer.
                                  Útil para diagnóstico y pruebas.
+            pipe_retry_max_s:    Segundos máximos de espera al arrancar antes de timeout.
             logger:              Logger externo. Si None, usa logging.getLogger(__name__).
         """
         self._pipe_path = pipe_path
@@ -169,6 +172,7 @@ class StreamProcessor:
         self._shm_habilitado = shm_habilitado
         self._shm_path = shm_path or SHM_PATH
         self._dry_run = dry_run
+        self._pipe_retry_max_s = pipe_retry_max_s
         self._logger = logger or logging.getLogger(__name__)
 
         # Estado interno
@@ -228,7 +232,18 @@ class StreamProcessor:
                     logger=self._logger
                 )
 
-            self._abrir_pipe()
+            # Esperar y abrir el pipe con retry.
+            # Si el pipe no aparece en el tiempo límite, se registra el error y
+            # el procesador termina limpiamente sin propagar excepción fatal.
+            try:
+                self._abrir_pipe_con_retry()
+            except RuntimeError as exc:
+                self._logger.error(
+                    f"[STREAM_PIPE_FAIL] No se pudo abrir el pipe al arrancar: {exc}. Terminando."
+                )
+                self._running = False
+                return
+
             self._bucle_lectura()
 
         except KeyboardInterrupt:
@@ -267,19 +282,82 @@ class StreamProcessor:
     # Gestión del pipe
     # -----------------------------------------------------------------------
 
+    def _abrir_pipe_con_retry(self) -> None:
+        """
+        Intenta abrir el named pipe con backoff exponencial.
+
+        Espera hasta self._pipe_retry_max_s segundos a que el pipe aparezca
+        y sea accesible. Esto permite que stream_processor sobreviva a reinicios
+        temporales de registro_continuo sin caer en un error fatal inmediato.
+
+        - O_RDWR: evita el EOF en el lado lector cuando no hay escritor activo
+          (ver ADR-006).
+        - O_NONBLOCK: os.read() levanta BlockingIOError (EAGAIN) en lugar de
+          bloquearse, permitiendo que el bucle responda a stop().
+
+        Raises:
+            RuntimeError: Si el pipe no aparece o no es accesible tras el timeout.
+        """
+        wait = 0.5
+        elapsed = 0.0
+
+        while self._running:
+            # Caso 1: El pipe no existe todavía
+            if not os.path.exists(self._pipe_path):
+                self._logger.warning(
+                    f"[PIPE_WAIT] Pipe no encontrado: {self._pipe_path}. "
+                    f"Reintentando en {wait:.1f}s... "
+                    f"({elapsed:.0f}/{self._pipe_retry_max_s:.0f}s)"
+                )
+                time.sleep(wait)
+                elapsed += wait
+                wait = min(wait * 2, 8.0)
+
+                if elapsed >= self._pipe_retry_max_s:
+                    raise RuntimeError(
+                        f"Named pipe no disponible tras {self._pipe_retry_max_s:.0f}s "
+                        f"de espera: {self._pipe_path}. "
+                        f"¿Está corriendo registro_continuo?"
+                    )
+                continue
+
+            # Caso 2: El pipe existe, intentar abrir
+            try:
+                self._fd = os.open(self._pipe_path, os.O_RDWR | os.O_NONBLOCK)
+                self._logger.info(
+                    f"[PIPE_OPEN] Pipe abierto: {self._pipe_path} "
+                    f"(fd={self._fd}, O_RDWR|O_NONBLOCK)"
+                )
+                return
+
+            except PermissionError as e:
+                self._logger.warning(
+                    f"[PIPE_PERMISSION_RETRY] Permisos denegados en "
+                    f"{self._pipe_path}: {e}. "
+                    f"Reintentando en {wait:.1f}s... "
+                    f"({elapsed:.0f}/{self._pipe_retry_max_s:.0f}s)"
+                )
+                time.sleep(wait)
+                elapsed += wait
+                wait = min(wait * 2, 8.0)
+
+                if elapsed >= self._pipe_retry_max_s:
+                    raise RuntimeError(
+                        f"Pipe inaccesible por permisos tras "
+                        f"{self._pipe_retry_max_s:.0f}s: {self._pipe_path}. "
+                        f"Ejecute: sudo chmod 666 {self._pipe_path}"
+                    )
+
+        raise RuntimeError("Procesador detenido antes de abrir el pipe.")
+
     def _abrir_pipe(self) -> None:
         """
-        Abre el named pipe con O_RDWR | O_NONBLOCK.
-
-        - O_RDWR: evita el EOF en el lado lector cuando no hay escritor activo,
-          ya que el proceso mismo mantiene el extremo de escritura abierto.
-          Esto es la "Opción B" documentada en prompts_temporales.md.
-        - O_NONBLOCK: hace que os.read() levante BlockingIOError (EAGAIN) en
-          lugar de bloquearse cuando no hay datos. Esto permite que el bucle
-          compruebe self._running y responda a stop() sin demora.
+        Abre el named pipe con O_RDWR | O_NONBLOCK directamente (sin reintentos).
+        Mantenido para compatibilidad con llamadas directas y pruebas unitarias.
 
         Raises:
             FileNotFoundError: Si el pipe no existe en la ruta configurada.
+            PermissionError:   Si no se tienen permisos de lectura/escritura.
             OSError:           Si no se puede abrir por otro motivo.
         """
         if not os.path.exists(self._pipe_path):

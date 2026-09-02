@@ -188,13 +188,40 @@ def test_init_valores_personalizados():
 # ---------------------------------------------------------------------------
 
 def test_abrir_pipe_no_existente_lanza_error():
-    """run() lanza FileNotFoundError si el pipe no existe."""
+    """_abrir_pipe() directo lanza FileNotFoundError si el pipe no existe."""
     p = StreamProcessor(pipe_path="/tmp/pipe_que_no_existe_rsa.fifo", dry_run=True)
     _assert_raises(
         FileNotFoundError,
-        p.run,
-        "pipe inexistente debe lanzar FileNotFoundError"
+        p._abrir_pipe,
+        "pipe inexistente debe lanzar FileNotFoundError al llamar a _abrir_pipe"
     )
+
+
+def test_abrir_pipe_retry_timeout_lanza_error():
+    """_abrir_pipe_con_retry() lanza RuntimeError si el pipe no aparece tras timeout."""
+    p = StreamProcessor(
+        pipe_path="/tmp/pipe_que_no_existe_rsa.fifo",
+        pipe_retry_max_s=0.1,
+        dry_run=True
+    )
+    p._running = True
+    _assert_raises(
+        RuntimeError,
+        p._abrir_pipe_con_retry,
+        "_abrir_pipe_con_retry debe lanzar RuntimeError tras expirar el timeout"
+    )
+
+
+def test_run_pipe_inexistente_termina_limpiamente():
+    """run() termina limpiamente registrando error sin propagar excepción fatal."""
+    p = StreamProcessor(
+        pipe_path="/tmp/pipe_que_no_existe_rsa.fifo",
+        pipe_retry_max_s=0.1,
+        dry_run=True
+    )
+    # run() no debe levantar excepción
+    p.run()
+    assert p._running is False, "El procesador debe quedar detenido tras fallo de pipe"
 
 
 def test_abrir_pipe_existente():
@@ -505,6 +532,8 @@ if __name__ == "__main__":
         ]),
         ("apertura del pipe", [
             test_abrir_pipe_no_existente_lanza_error,
+            test_abrir_pipe_retry_timeout_lanza_error,
+            test_run_pipe_inexistente_termina_limpiamente,
             test_abrir_pipe_existente,
         ]),
         ("procesamiento de tramas individuales", [
