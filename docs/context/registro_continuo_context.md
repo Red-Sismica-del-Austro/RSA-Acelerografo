@@ -212,6 +212,43 @@ gcc -o registro_continuo_4.5.0 registro_continuo_4.5.0.c \
 
 ---
 
+## Gestión del Servicio y Ciclo de Vida (Systemd)
+
+A partir del plan de resiliencia (2026-09-02), la ejecución de `registro_continuo` está gobernada por la unidad systemd **`rsa-acelerografo.service`** (plantilla en `scripts/task/rsa-acelerografo.service.template`):
+
+```ini
+[Unit]
+Description=RSA Acelerógrafo - Registro Continuo (Adquisición SPI)
+After=network.target local-fs.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo
+ExecStartPre=/bin/rm -f /tmp/my_pipe
+ExecStartPre={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/reset_master
+ExecStart={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/registro_continuo
+ExecStopPost=/bin/rm -f /tmp/my_pipe
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Características de Resiliencia:
+1. **Auto-reinicio (`Restart=always`, `RestartSec=5`)**: Recupera la adquisición en $\le 5$ segundos ante cualquier fallo o caída forzada (`SIGKILL`).
+2. **Reseteo por Hardware (`reset_master`) en `ExecStartPre`**: Envía un pulso en bajo al pin MCLR (100 ms) antes de que el binario C inicie, reseteando el dsPIC33 y eliminando desfasajes en el bus SPI.
+3. **Purga Automática de FIFO**: Remueve `/tmp/my_pipe` antes de arrancar y al detenerse para evitar bloqueos por descriptores residuales.
+4. **Permisos de Named Pipe**: Línea 194 ejecuta `chmod(PIPE_NAME, 0666)` garantizando acceso de lectura/escritura a los daemons sin privilegios que corren bajo Supervisor (`rsa`).
+5. **Control Operativo**: Gobernado mediante `/usr/local/bin/registrocontinuo {start|stop|restart|status}`.
+
+---
+
 ## Rendimiento Estimado
 
 | Métrica | Valor |
@@ -230,13 +267,13 @@ gcc -o registro_continuo_4.5.0 registro_continuo_4.5.0.c \
 - Sin validación de integridad de tramas SPI (no hay checksum)
 - Archivos `.dat` sin compresión (~216 MB/día)
 - Timestamp con resolución de 1 segundo
-- Sin detección automática de eventos (eliminada en v4.5.0, se hace offline con ObsPy/SeisComP)
-- Si RPi se reinicia, no hay protocolo de re-sincronización explícito con dsPIC
-- `write_log()` abre/cierra el archivo en cada llamada (potencial cuello de botella bajo alta frecuencia de logging)
+- Sin detección automática de eventos en C (eliminada en v4.5.0, se realiza mediante `gpd_stream_worker.py` en Python con TFLite)
+- `write_log()` abre/cierra el archivo en cada llamada
 - `crear_nuevo_archivo()` re-parsea el JSON en cada rotación horaria
 
 ---
 
 ## Contexto Histórico
 
-La v4.5.0 eliminó completamente la detección automática de eventos STA/LTA (~565 líneas), filtro FIR pasa-altos, y publicación MQTT de eventos. Archivos eliminados: `detector_eventos.c`, `detector_eventos.h`. Reducción total: de ~1518 a ~758 LOC.
+- **v4.5.0**: Eliminó la detección STA/LTA en C (~565 LOC) para migrar a GPD/ObsPy.
+- **2026-09-02 (Resiliencia Post-Incidente CHA01)**: Migración de arranque de crontab (`@reboot`) a systemd con auto-reinicio, `reset_master` síncrono previo a SPI y purga del FIFO `/tmp/my_pipe`.

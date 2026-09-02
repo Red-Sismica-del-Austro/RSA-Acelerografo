@@ -77,6 +77,7 @@ Default: `rsa/seismic/smart/{id}/...`
 |---|---|---|---|---|
 | `telemetry_state` | `…/{id}/telemetry/state` | 1 | ✅ | Pub |
 | `telemetry_health` | `…/{id}/telemetry/health` | 1 | ❌ | Pub |
+| `status_acquisition` | `…/{id}/status/acquisition` | 1 | ❌ | Pub (cada 60s) |
 | `cmd_execute` | `…/{id}/cmd/+` | 1 | — | Sub |
 | `cmd_broadcast` | `…/broadcast/cmd/+` | 1 | — | Sub |
 | `cmd_response` | `…/{id}/cmd/{task_name}/res` | 1 | ❌ | Pub |
@@ -118,6 +119,22 @@ Publicado en: conexión (`"online"`), inicio (`"on"`), shutdown (`"offline"`), y
 | `cpu_temp_c` | `vcgencmd measure_temp` | `-1` |
 | `throttled` | `vcgencmd get_throttled` | `"unknown"` |
 
+### Status Acquisition (`status/acquisition`) — cada 60 segundos (Watchdog)
+
+Auditado mediante `AcquisitionWatchdog` sobre el Ring Buffer en disco (`/home/rsa/data/ring-buffer/`):
+
+```json
+{
+  "status": "ok",
+  "last_frame_utc": "2026-09-02T21:51:09Z",
+  "age_seconds": 1.6,
+  "station_id": "DEV0",
+  "timestamp": "2026-09-02T21:51:10Z"
+}
+```
+
+Si la adquisición se estanca (`age_seconds > 300 s`), emite `status: "warning"`, `reason: "stale_data"`.
+
 ---
 
 ## Comandos (Dispatcher)
@@ -129,6 +146,7 @@ Recibidos vía `cmd/+`, procesados por `CommandDispatcher`:
 | `restart_acquisition` | `_cmd_restart_acquisition()` | ❌ TODO |
 | `cleanup_files` | `_cmd_cleanup_files()` | ❌ TODO |
 | `get_status` | `_cmd_get_status()` | ✅ Funcional |
+| `get_acquisition_status` | `_cmd_get_acquisition_status()` | ✅ Funcional (Watchdog Ring Buffer) |
 | `extract_event` | `_cmd_extract_event()` | ✅ Funcional (Asíncrono + CSV) |
 
 **Flujo de comando regular**:

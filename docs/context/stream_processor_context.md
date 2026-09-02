@@ -66,6 +66,7 @@ StreamProcessor(
     archivo_duracion_s=300,
     usar_fecha_filename=True,          # Mitiga bug de fecha del dsPIC
     dry_run=False,                     # Si True: cuenta tramas sin escribir
+    pipe_retry_max_s=120,              # Espera máxima con backoff exponencial al arrancar
     logger=None,
 )
 ```
@@ -74,8 +75,15 @@ StreamProcessor(
 
 | Método | Descripción |
 |--------|-------------|
-| `run()` | Inicia el daemon. Bloquea hasta SIGTERM/SIGINT o error fatal. |
+| `run()` | Inicia el daemon. Ejecuta `_abrir_pipe_con_retry()` con backoff exponencial y procesa el bucle de lectura. Bloquea hasta SIGTERM/SIGINT o salida controlada por timeout. |
 | `stop()` | Solicita parada ordenada. Thread-safe. |
+
+### Métodos internos de apertura del FIFO
+
+| Método | Descripción |
+|--------|-------------|
+| `_abrir_pipe_con_retry()` | Bucle de reintentos con backoff exponencial (0.5s a 8.0s, máx 120s). Tolera arranques asíncronos de `registro_continuo` y permisos transitorios denegados. |
+| `_abrir_pipe()` | Apertura directa y síncrona de `/tmp/my_pipe` (preservada para tests y compatibilidad). |
 
 ### Atributos de estadísticas (solo lectura)
 
@@ -152,8 +160,11 @@ python3 stream_processor.py --dry-run --verbose
 | `[STREAM_TIMEOUT]` | WARNING | Sin datos por >10 segundos |
 | `[STREAM_SIGNAL]` | INFO | Señal SIGTERM/SIGINT recibida |
 | `[STREAM_EXIT]` | INFO | Estadísticas finales al cierre |
+| `[PIPE_WAIT]` | WARNING | FIFO ausente; reintentando con backoff exponencial |
+| `[PIPE_PERMISSION_RETRY]` | WARNING | Permisos denegados; reintentando con backoff exponencial |
 | `[PIPE_OPEN]` | INFO | Pipe abierto con éxito |
 | `[PIPE_CLOSE]` | INFO | Pipe cerrado |
+| `[STREAM_PIPE_FAIL]` | ERROR | Timeout de espera alcanzado; salida limpia |
 | `[PIPE_READ_ERROR]` | ERROR | Error de lectura del pipe |
 | `[FRAME_INVALID]` | WARNING | Trama descartada por timestamp inválido |
 | `[FRAME_WRITE_ERROR]` | ERROR | Error escribiendo al ring buffer |
@@ -176,7 +187,7 @@ python3 scripts/operation/streaming/test_stream_processor.py
 | Grupo | Tests |
 |-------|-------|
 | Inicialización y argumentos | 2 |
-| Apertura del pipe | 2 |
+| Apertura del pipe (incluye retry y salida limpia) | 4 |
 | Procesamiento de tramas individuales | 3 |
 | Acumulación de lecturas parciales | 2 |
 | Flujo completo con FIFO real (dry_run) | 3 |
@@ -184,7 +195,7 @@ python3 scripts/operation/streaming/test_stream_processor.py
 | Señales y cierre limpio | 3 |
 | Estadísticas | 2 |
 
-**Total: 18 tests**
+**Total: 20 tests**
 
 ---
 
