@@ -19,11 +19,15 @@ from event_extractor import extraer_y_subir_evento
 # Importar EventLogger para registro CSV de detecciones sísmicas
 from core.event_logger import EventLogger
 
+# Importar AcquisitionWatchdog para monitoreo de frescura de tramas
+from mqtt.acquisition_watchdog import AcquisitionWatchdog
+
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIGURACIÓN Y CONSTANTES
 # ═══════════════════════════════════════════════════════════════════════════
 
 HEALTH_INTERVAL = 300    # segundos
+ACQUISITION_CHECK_INTERVAL = 60  # segundos entre chequeos de frescura del Ring Buffer
 DAILY_REPUBLISH_HOUR = 0  # Hora para re-publicar estado diario (00:00)
 START_TIME = time.time()
 
@@ -85,14 +89,16 @@ def guardar_estado(estado: str, timestamp: str, state_file_path: str, logger: St
 class CommandDispatcher:
     """Centraliza el manejo de comandos recibidos via MQTT."""
     
-    def __init__(self, config: dict, logger: StructuredLogger, event_logger=None):
+    def __init__(self, config: dict, logger: StructuredLogger, event_logger=None, watchdog=None):
         self.config = config
         self.logger = logger
         self.event_logger = event_logger  # EventLogger para CSV de detecciones
+        self.watchdog = watchdog          # AcquisitionWatchdog para latencia del Ring Buffer
         self.handlers = {
             "restart_acquisition": self._cmd_restart_acquisition,
             "cleanup_files": self._cmd_cleanup_files,
             "get_status": self._cmd_get_status,
+            "get_acquisition_status": self._cmd_get_acquisition_status,
             "extract_event": self._cmd_extract_event,
         }
     
@@ -121,6 +127,16 @@ class CommandDispatcher:
         return {
             "status": "ok",
             "uptime_s": int(time.time() - START_TIME),
+            "timestamp": timestamp_iso()
+        }
+
+    def _cmd_get_acquisition_status(self, payload: dict, client) -> dict:
+        """Retorna el estado de latencia y salud de adquisición bajo demanda."""
+        if self.watchdog is not None:
+            return self.watchdog.evaluar_salud(station_id=self.config["id"])
+        return {
+            "status": "error",
+            "reason": "watchdog_not_available",
             "timestamp": timestamp_iso()
         }
 
@@ -339,6 +355,39 @@ def publicar_health(client, config: dict, logger: StructuredLogger):
     qos = config["qos"]["telemetry"]
     retain = config["retain"]["telemetry_health"]
     client.publish(topic, json.dumps(metricas), qos=qos, retain=retain)
+
+def publicar_acquisition_status(client, config: dict, watchdog: AcquisitionWatchdog, logger: StructuredLogger):
+    """Publica estado de frescura y latencia de adquisición en MQTT cada ACQUISITION_CHECK_INTERVAL segundos."""
+    try:
+        topic = resolver_topico(config, "status_acquisition")
+    except KeyError:
+        template = "{org}/{app}/{cap}/{id}/status/acquisition"
+        topic = template.format(
+            org=config.get("org", "rsa"),
+            app=config.get("app", "seismic"),
+            cap=config.get("cap", "smart"),
+            id=config.get("id", "UNKNOWN")
+        )
+
+    payload = watchdog.evaluar_salud(station_id=config["id"])
+    qos = config["qos"].get("telemetry", 1)
+    retain = config.get("retain", {}).get("status_acquisition", False)
+    client.publish(topic, json.dumps(payload), qos=qos, retain=retain)
+
+    status = payload.get("status")
+    if status == "warning":
+        logger.warning(
+            f"[ACQUISITION_STALE] Adquisición estancada: última trama hace "
+            f"{payload.get('age_seconds')}s (umbral: {payload.get('threshold_seconds')}s)"
+        )
+    elif status == "error":
+        logger.error(
+            f"[ACQUISITION_ERROR] Error evaluando adquisición: {payload.get('reason')}"
+        )
+    else:
+        logger.info(
+            f"[ACQUISITION_OK] Adquisición nominal: age={payload.get('age_seconds')}s"
+        )
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CALLBACKS MQTT
@@ -626,7 +675,8 @@ def on_message(client, userdata, msg):
 def iniciar_cliente(config: dict, logger: StructuredLogger, userdata: dict):
     """Inicializa y configura el cliente MQTT."""
     event_logger = userdata.get("event_logger")
-    dispatcher = CommandDispatcher(config, logger, event_logger=event_logger)
+    watchdog = userdata.get("watchdog")
+    dispatcher = CommandDispatcher(config, logger, event_logger=event_logger, watchdog=watchdog)
     correlator = EventCorrelator(config, logger)
 
     userdata.update({
@@ -712,12 +762,19 @@ def main():
     # Inicializar EventLogger para registro CSV de detecciones
     event_logger = EventLogger(logger=logger)
 
+    # Inicializar AcquisitionWatchdog para monitoreo de frescura del Ring Buffer
+    ring_dir = device_config.get("streaming", {}).get("ring_buffer", {}).get(
+        "directorio", "/home/rsa/data/ring-buffer/"
+    )
+    watchdog = AcquisitionWatchdog(ring_dir=ring_dir, logger=logger)
+
     # Preparar userdata para el cliente
     userdata = {
         "config": config,
         "logger": logger,
         "device_config": device_config,
         "event_logger": event_logger,
+        "watchdog": watchdog,
         "state_file_path": state_file,
         "boot_published": False,
         "last_state_change": None,
@@ -728,8 +785,9 @@ def main():
     client = iniciar_cliente(config, logger, userdata)
     client.loop_start()
     
-    # Loop principal con timers de telemetría y re-publicación diaria
+    # Loop principal con timers de telemetría, adquisición y re-publicación diaria
     last_health = 0
+    last_acquisition_check = 0
     last_day = datetime.now(timezone.utc).day
     
     try:
@@ -739,6 +797,10 @@ def main():
             if now - last_health >= HEALTH_INTERVAL:
                 publicar_health(client, config, logger)
                 last_health = now
+
+            if now - last_acquisition_check >= ACQUISITION_CHECK_INTERVAL:
+                publicar_acquisition_status(client, config, watchdog, logger)
+                last_acquisition_check = now
             
             # Re-publicación diaria a las 00:00
             now_dt = datetime.now(timezone.utc)
