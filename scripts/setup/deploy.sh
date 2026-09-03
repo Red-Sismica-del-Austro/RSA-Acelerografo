@@ -93,6 +93,16 @@ sudo crontab $PROJECT_GIT_ROOT/scripts/task/crontab.txt
 cd $PROJECT_GIT_ROOT/scripts/setup/
 make
 
+# Instalar servicio systemd para registro_continuo
+echo "Configurando servicio systemd rsa-acelerografo..."
+sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" \
+    "$PROJECT_GIT_ROOT/scripts/task/rsa-acelerografo.service.template" \
+    > "$PROJECT_LOCAL_ROOT/tmp-files/rsa-acelerografo.service"
+sudo cp "$PROJECT_LOCAL_ROOT/tmp-files/rsa-acelerografo.service" \
+    /etc/systemd/system/rsa-acelerografo.service
+sudo systemctl daemon-reload
+sudo systemctl enable rsa-acelerografo.service
+
 # Asegurar que los archivos de log tengan permisos correctos
 # (necesario porque el crontab de root puede crearlos después)
 sudo chown $USER:$USER $PROJECT_LOCAL_ROOT/log-files/*.log 2>/dev/null || true

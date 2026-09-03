@@ -6,6 +6,7 @@
     "topics": {
         "telemetry_state": "{org}/{app}/{cap}/{id}/telemetry/state",
         "telemetry_health": "{org}/{app}/{cap}/{id}/telemetry/health",
+        "status_acquisition": "{org}/{app}/{cap}/{id}/status/acquisition",
         "events_heartbeat": "{org}/{app}/{cap}/{id}/events/heartbeat",
         "events_local": "{org}/{app}/{cap}/{id}/events/detected",
         "events_regional": "{org}/{app}/{cap}/+/events/detected",
@@ -30,6 +31,7 @@
     "retain": {
         "telemetry_state": true,
         "telemetry_health": false,
+        "status_acquisition": false,
         "events_local": false,
         "cmd_response": false
     }

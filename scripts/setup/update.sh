@@ -132,6 +132,39 @@ else
     echo "No se detectaron cambios en los acelerografo-scripts o sus librerias."
 fi
 
+# Función para actualizar servicio systemd de registro_continuo
+function update_systemd_service {
+    local src="$PROJECT_GIT_ROOT/scripts/task/rsa-acelerografo.service.template"
+    local temp="$PROJECT_LOCAL_ROOT/tmp-files/rsa-acelerografo.service.tmp"
+    local dest="/etc/systemd/system/rsa-acelerografo.service"
+
+    if [ ! -f "$src" ]; then
+        echo "Advertencia: No se encontró la plantilla del servicio systemd."
+        return
+    fi
+
+    sed "s|{{PROJECT_LOCAL_ROOT}}|$PROJECT_LOCAL_ROOT|g" "$src" > "$temp"
+
+    if [ ! -f "$dest" ] || ! cmp -s "$temp" "$dest"; then
+        echo "Actualizando servicio systemd: rsa-acelerografo.service"
+        sudo cp "$temp" "$dest"
+        sudo systemctl daemon-reload
+        sudo systemctl enable rsa-acelerografo.service
+        sudo systemctl restart rsa-acelerografo.service
+    else
+        echo "No se detectaron cambios en el servicio systemd (rsa-acelerografo)."
+    fi
+
+    # Garantizar que el servicio esté siempre habilitado para auto-arranque tras reboot
+    if ! systemctl is-enabled --quiet rsa-acelerografo.service 2>/dev/null; then
+        echo "Habilitando auto-arranque en boot para rsa-acelerografo.service..."
+        sudo systemctl enable rsa-acelerografo.service
+    fi
+}
+
+# Revisar y actualizar servicio systemd
+update_systemd_service
+
 # Función para actualizar configuración de Supervisor
 function update_supervisor_config {
     # --- mqtt_coordinator ---

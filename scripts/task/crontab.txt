@@ -1,11 +1,8 @@
-# Inicia el registro continuo cada x horas: 
+# Inicia la conversion horaria y subida de archivos (verifica registro_continuo via systemd):
 0 * * * * sleep 30 && /usr/local/bin/registrocontinuo start
 
-# Resetea el circuito al iniciar el sistem:
-@reboot sleep 30 && /usr/local/bin/resetmaster
-
-# Espera 180 segundos al arranque del sistema para ejecutar el registro continuo:
-@reboot sleep 180 && /usr/local/bin/registrocontinuo start
+# Reseteo de hardware y arranque de registro continuo unificados en:
+# /etc/systemd/system/rsa-acelerografo.service (ExecStartPre y Restart=always)
 
 # Copia esta configuracion unicamente en el equipo CHA02:
 #@reboot sleep 60 && sudo /etc/network/rutasEstaticas.sh
