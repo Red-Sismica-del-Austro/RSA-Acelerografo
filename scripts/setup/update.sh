@@ -149,9 +149,16 @@ function update_systemd_service {
         echo "Actualizando servicio systemd: rsa-acelerografo.service"
         sudo cp "$temp" "$dest"
         sudo systemctl daemon-reload
+        sudo systemctl enable rsa-acelerografo.service
         sudo systemctl restart rsa-acelerografo.service
     else
         echo "No se detectaron cambios en el servicio systemd (rsa-acelerografo)."
+    fi
+
+    # Garantizar que el servicio esté siempre habilitado para auto-arranque tras reboot
+    if ! systemctl is-enabled --quiet rsa-acelerografo.service 2>/dev/null; then
+        echo "Habilitando auto-arranque en boot para rsa-acelerografo.service..."
+        sudo systemctl enable rsa-acelerografo.service
     fi
 }
 

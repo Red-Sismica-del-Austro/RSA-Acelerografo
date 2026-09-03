@@ -1,7 +1,7 @@
 [Unit]
 Description=RSA Acelerógrafo - Registro Continuo (Adquisición SPI)
 Documentation=https://github.com/RSA-Acelerografo
-After=network.target
+After=network.target local-fs.target
 StartLimitIntervalSec=300
 StartLimitBurst=10
 
@@ -15,6 +15,9 @@ ExecStartPre=/bin/rm -f /tmp/my_pipe
 
 # 2. Reseteo por hardware del microcontrolador dsPIC33 (pulso MCLR y TEST)
 ExecStartPre={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/reset_master
+
+# 3. Espera activa de sincronización NTP (máx 120s, no bloqueante ante modo offline)
+ExecStartPre=/usr/local/bin/wait_for_ntp 120
 
 # Ejecutable compilado de adquisición continua
 ExecStart={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/registro_continuo

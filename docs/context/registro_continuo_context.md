@@ -229,6 +229,7 @@ User=root
 WorkingDirectory={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo
 ExecStartPre=/bin/rm -f /tmp/my_pipe
 ExecStartPre={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/reset_master
+ExecStartPre=/usr/local/bin/wait_for_ntp 120
 ExecStart={{PROJECT_LOCAL_ROOT}}/scripts/acelerografo/ejecutables/registro_continuo
 ExecStopPost=/bin/rm -f /tmp/my_pipe
 Restart=always
@@ -243,9 +244,11 @@ WantedBy=multi-user.target
 ### Características de Resiliencia:
 1. **Auto-reinicio (`Restart=always`, `RestartSec=5`)**: Recupera la adquisición en $\le 5$ segundos ante cualquier fallo o caída forzada (`SIGKILL`).
 2. **Reseteo por Hardware (`reset_master`) en `ExecStartPre`**: Envía un pulso en bajo al pin MCLR (100 ms) antes de que el binario C inicie, reseteando el dsPIC33 y eliminando desfasajes en el bus SPI.
-3. **Purga Automática de FIFO**: Remueve `/tmp/my_pipe` antes de arrancar y al detenerse para evitar bloqueos por descriptores residuales.
-4. **Permisos de Named Pipe**: Línea 194 ejecuta `chmod(PIPE_NAME, 0666)` garantizando acceso de lectura/escritura a los daemons sin privilegios que corren bajo Supervisor (`rsa`).
-5. **Control Operativo**: Gobernado mediante `/usr/local/bin/registrocontinuo {start|stop|restart|status}`.
+3. **Espera Activa de Sincronización NTP (`wait_for_ntp`) en `ExecStartPre`**: Espera hasta 120 s a que el reloj del sistema se sincronice con NTP antes de abrir el primer archivo `.dat` o transmitir la hora al dsPIC, evitando saltos temporales bruscos tras reinicios. Si la estación está offline, el timeout concluye con advertencia sin bloquear el servicio.
+4. **Purga Automática de FIFO**: Remueve `/tmp/my_pipe` antes de arrancar y al detenerse para evitar bloqueos por descriptores residuales.
+5. **Permisos de Named Pipe**: Línea 194 ejecuta `chmod(PIPE_NAME, 0666)` garantizando acceso de lectura/escritura a los daemons sin privilegios que corren bajo Supervisor (`rsa`).
+6. **Auto-habilitación en Boot**: `update.sh` ejecuta `systemctl enable` para garantizar el auto-arranque tras `reboot`.
+7. **Control Operativo**: Gobernado mediante `/usr/local/bin/registrocontinuo {start|stop|restart|status}`.
 
 ---
 
