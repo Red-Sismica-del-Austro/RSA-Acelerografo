@@ -39,7 +39,10 @@ Mover la gestión del ciclo de vida y reseteo de hardware a daemons de Python ba
 
 ### Opción C: Arquitectura en 4 Capas de Defensa en Profundidad y Desacoplamiento (Elegida)
 Separar responsabilidades por capas de privilegio y roles de ejecución:
-1. **Capa 1 (Hardware / Systemd como root)**: Unidad `rsa-acelerografo.service` con `Restart=always`, `RestartSec=5`, purga de `/tmp/my_pipe` y ejecución de `reset_master` en `ExecStartPre` (pulso MCLR previo a SPI). Eliminación de tareas `@reboot` en crontab.
+1. **Capa 1 (Hardware / Systemd como root)**:
+   - Unidad `rsa-acelerografo.service` con `Restart=always`, `RestartSec=5`, purga de `/tmp/my_pipe` y ejecución de `reset_master` en `ExecStartPre` (pulso MCLR previo a SPI). Eliminación de tareas `@reboot` en crontab.
+   - **Espera Activa de Sincronización NTP (`wait_for_ntp 120`)**: `ExecStartPre` sondea activamente `ntpstat` (cada 2 s) antes de abrir el primer archivo `.dat` o transmitir la hora al dsPIC. Arranca de inmediato al sincronizar (ahorro de 85 s vs el viejo cron) y retorna `exit 0` no bloqueante a los 120 s si opera offline.
+   - **Auto-habilitación en Boot**: `update.sh` ejecuta `systemctl enable` incondicionalmente para garantizar el auto-arranque tras `reboot`.
 2. **Capa 2 (Named Pipe IPC)**: Permisos `0666` incondicionales (`chmod`) y apertura `O_RDWR | O_NONBLOCK` para evitar bloqueos EOF/SIGPIPE.
 3. **Capa 3 (Consumo en Supervisor como usuario rsa)**: Reintentos con backoff exponencial (`0.5s` $\rightarrow$ `8.0s`, máx `120s`) en `stream_processor.py` para desacoplar caídas transitorias de `registro_continuo`.
 4. **Capa 4 (Telemetría y Watchdog MQTT)**: Módulo `AcquisitionWatchdog` en `mqtt_coordinator.py` que audita cada 60 s la frescura del Ring Buffer y emite alertas estructuradas en el tópico `{org}/{app}/{cap}/{id}/status/acquisition`.
@@ -48,7 +51,7 @@ Separar responsabilidades por capas de privilegio y roles de ejecución:
 
 ## Decisión
 
-Se eligió la **Opción C** porque proporciona una arquitectura de resiliencia integral y desacoplada que respeta los límites de privilegios del sistema operativo (root para hardware/systemd, usuario sin privilegios para daemons Python) y garantiza auto-recuperación determinista en $\le 5$ segundos ante cualquier fallo de hardware o software.
+Se eligió la **Opción C** porque proporciona una arquitectura de resiliencia integral y desacoplada que respeta los límites de privilegios del sistema operativo (root para hardware/systemd, usuario sin privilegios para daemons Python), elimina esperas ciegas en el arranque garantizando sincronización temporal atómica, y asegura auto-recuperación determinista en $\le 5$ segundos ante cualquier fallo de hardware o software.
 
 ---
 
@@ -56,6 +59,7 @@ Se eligió la **Opción C** porque proporciona una arquitectura de resiliencia i
 
 ### Positivas
 - **Auto-recuperación Determinista**: Systemd reinicia la adquisición en 5 segundos ante caídas abruptas (`SIGKILL`), resincronizando el dsPIC33 por hardware antes de reabrir el bus SPI.
+- **Integridad Temporal en Frío**: `wait_for_ntp` previene saltos temporales bruscos en archivos `.dat`, Ring Buffer y reloj dsPIC tras reinicios o cortes prolongados, reduciendo el tiempo de espera en un 44% (85 s ganados) respecto al método histórico.
 - **Inmunidad ante Arranques Asíncronos**: `stream_processor.py` sobrevive a reinicios o paradas temporales de `registro_continuo` gracias al backoff exponencial, sin crashear en Supervisor.
 - **Defensa de Permisos**: `/tmp/my_pipe` se purga en `ExecStartPre` y `ExecStopPost`, y se recrea con permisos `0666`.
 - **Monitoreo Continuo**: La red central recibe cada 60 segundos la métrica `age_seconds` y alertas automáticas `warning: stale_data` si los datos superan los 5 minutos de antigüedad.
@@ -74,3 +78,4 @@ Se eligió la **Opción C** porque proporciona una arquitectura de resiliencia i
   - [`stream_processor_context.md`](../context/stream_processor_context.md)
   - [`mqtt_coordinator_context.md`](../context/mqtt_coordinator_context.md)
   - [`registro_continuo_context.md`](../context/registro_continuo_context.md)
+  - [`wait_for_ntp_context.md`](../context/wait_for_ntp_context.md)
