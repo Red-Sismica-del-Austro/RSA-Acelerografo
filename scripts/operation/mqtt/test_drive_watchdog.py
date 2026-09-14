@@ -219,6 +219,37 @@ def test_tolerancia_hasta_tres_pendientes():
         shutil.rmtree(temp_dir)
 
 
+def test_archivos_protegidos_inexistentes_en_disco_no_generan_warning():
+    """Archivos listados en fallidos pero ya inexistentes físicamente en disco no generan falso positivo."""
+    temp_dir = tempfile.mkdtemp(prefix="rsa_drive_test_")
+    try:
+        mseed_dir = os.path.join(temp_dir, "mseed")
+        os.makedirs(mseed_dir)
+        status_file = os.path.join(temp_dir, "uploaded_files_registry.json")
+
+        # El archivo NO se crea en disco (es un registro huérfano/rotado)
+        status_data = {
+            "archivos_exitosos": {"mseed": {}},
+            "archivos_fallidos": {
+                "mseed": {
+                    "DEV0_huerfano.mseed": "2026-09-07 10:00:00"
+                }
+            }
+        }
+        with open(status_file, "w", encoding="utf-8") as f:
+            json.dump(status_data, f)
+
+        watchdog = DriveWatchdog(mseed_dir=mseed_dir, status_file=status_file)
+        res = watchdog.evaluar_sincronizacion(station_id="DEV0")
+
+        assert res["status"] == "ok", f"Esperado 'ok', obtenido {res['status']}"
+        assert res["reason"] == "all_synced"
+        assert res["pending_mseed"] == 0
+        assert res["failed_uploads_protected"] == 0
+    finally:
+        shutil.rmtree(temp_dir)
+
+
 if __name__ == "__main__":
     tests = [
         test_sincronizacion_nominal_retorna_ok,
@@ -228,6 +259,7 @@ if __name__ == "__main__":
         test_directorios_vacios_e_inexistentes,
         test_json_corrupto_en_status_file,
         test_tolerancia_hasta_tres_pendientes,
+        test_archivos_protegidos_inexistentes_en_disco_no_generan_warning,
     ]
 
     print("\n=================================================================")

@@ -107,17 +107,21 @@ class DriveWatchdog:
             except Exception:
                 pass
 
-        # 3. Contar archivos pendientes en disco
+        # 3. Contar archivos pendientes en disco y validar existencia de protegidos
         pending_mseed = 0
         if os.path.isdir(self.mseed_dir):
             try:
-                archivos_disco = [
+                archivos_disco = set(
                     f for f in os.listdir(self.mseed_dir)
                     if f.endswith(".mseed") or f.endswith(".MSEED")
-                ]
+                )
                 pending_mseed = len([f for f in archivos_disco if f not in ya_subidos])
+                # Solo alertar por archivos protegidos que efectivamente sigan en disco
+                protegidos = {f for f in protegidos if f in archivos_disco}
             except Exception:
                 pass
+        else:
+            protegidos = set()
 
         failed_uploads_protected = len(protegidos)
 

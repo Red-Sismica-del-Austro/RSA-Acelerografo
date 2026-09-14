@@ -124,6 +124,8 @@ Emitido si hay más de 3 archivos en disco que no han sido subidos aún:
    * Si el archivo de estado no existe o contiene JSON inválido, el módulo no aborta; maneja la excepción internamente y asume listas vacías para evaluar el directorio en disco de forma segura.
 3. **Resolución de Rutas Agnóstica**:
    * Si no se especifica `mseed_dir`, consulta prioritariamente la configuración de la estación o `$PROJECT_LOCAL_ROOT/datos/MSEED` sin depender de rutas rígidas.
+4. **Validación de Existencia Física en Disco (Anti Falsos Positivos)**:
+   * Solo contabiliza como `failed_uploads_protected` aquellos archivos que persistan físicamente en el directorio local de MiniSEED, evitando alertas por registros históricos huérfanos que ya fueron purgados o no existen en disco.
 
 ---
 
@@ -135,4 +137,4 @@ Emitido si hay más de 3 archivos en disco que no han sido subidos aún:
 cd /home/rsa/projects/acelerografo
 .venv/bin/python3 scripts/mqtt/test_drive_watchdog.py
 ```
-* Cobertura: 7 pruebas unitarias validando sincronización nominal, alerta por backlog (>3 archivos), alerta por archivos protegidos, compatibilidad con `uploaded_files_registry.json`, directorios inexistentes, JSON corrupto y tolerancia de cola hasta 3 archivos.
+* Cobertura: 8 pruebas unitarias validando sincronización nominal, alerta por backlog (>3 archivos), alerta por archivos protegidos, compatibilidad con `uploaded_files_registry.json`, directorios inexistentes, JSON corrupto, tolerancia de cola hasta 3 archivos e inmunidad ante registros de archivos inexistentes en disco.
