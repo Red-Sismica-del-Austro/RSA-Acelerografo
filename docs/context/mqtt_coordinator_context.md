@@ -2,15 +2,15 @@
 proyecto: acelerografo-DEV00
 tipo: contexto_tecnico
 archivo: scripts/operation/mqtt/mqtt_coordinator.py
-temas: [mqtt, coordinador, comandos, telemetria, gpd, deteccion_sismica, csv, fase4]
-generado: 2026-07-07
+temas: [mqtt, coordinador, comandos, telemetria, watchdog, sensor, drive, resiliencia]
+generado: 2026-09-14
 ---
 # mqtt_coordinator.py — Contexto para Agentes IA
 
-> Agente reactivo MQTT que corre como daemon en Raspberry Pi. Publica telemetría (estado operacional + métricas de hardware), recibe comandos remotos, y a partir de la Fase 4 maneja detecciones GPD locales disparando extracción automática y registrando en CSV mensual.
+> Agente reactivo MQTT que corre como daemon en Raspberry Pi. Publica telemetría unificada cada 5 minutos (salud de hardware, frescura del Ring Buffer, integridad del sensor acelerométrico y sincronización con Google Drive con banderas de retención activas), maneja comandos remotos incluyendo parada de contingencia de seguridad, y gestiona detecciones GPD locales disparando extracción autónoma y registro en CSV mensual.
 
 **Ruta**: `scripts/operation/mqtt/mqtt_coordinator.py`  
-**LOC**: ~763 | **Lenguaje**: Python 3 | **Dependencias**: `paho-mqtt`, `python-dotenv`, `core.event_logger.EventLogger`, `event_extractor.extraer_y_subir_evento`  
+**LOC**: ~830 | **Lenguaje**: Python 3 | **Dependencias**: `paho-mqtt`, `python-dotenv`, `core.event_logger.EventLogger`, `event_extractor.extraer_y_subir_evento`, `mqtt.acquisition_watchdog.AcquisitionWatchdog`, `mqtt.sensor_watchdog.SensorWatchdog`, `mqtt.drive_watchdog.DriveWatchdog`  
 **Proceso**: Daemon gestionado por Supervisor
 
 ---
@@ -20,14 +20,20 @@ generado: 2026-07-07
 ```mermaid
 graph TD
     subgraph RPi["Raspberry Pi"]
-        COORD["mqtt_coordinator.py"]
+        COORD["mqtt_coordinator.py (Ciclo 300 s)"]
         HW["Hardware metrics\n(disk, RAM, CPU temp)"]
+        AW["AcquisitionWatchdog\n(Ring Buffer freshness)"]
+        SW["SensorWatchdog\n(Ax, Ay, Az, Reloj)"]
+        DW["DriveWatchdog\n(MSeed backlog / protected)"]
         EL["EventLogger\nCSV mensual"]
     end
 
     subgraph Broker["MQTT Broker"]
         T_STATE["telemetry/state"]
         T_HEALTH["telemetry/health"]
+        S_ACQ["status/acquisition (Retain)"]
+        S_SENS["status/sensor (Retain)"]
+        S_DRV["status/drive (Retain)"]
         CMD["cmd/+"]
         CMD_RES["cmd/{task}/res"]
         EVT_LOCAL["{id}/events/detected"]
@@ -37,6 +43,12 @@ graph TD
 
     COORD -->|pub retain| T_STATE
     COORD -->|pub cada 5min| T_HEALTH
+    COORD -->|pub cada 5min retain| S_ACQ
+    COORD -->|pub cada 5min retain| S_SENS
+    COORD -->|pub cada 5min retain| S_DRV
+    AW --> COORD
+    SW --> COORD
+    DW --> COORD
     HW --> COORD
     CMD -->|sub| COORD
     COORD -->|pub respuesta| CMD_RES
@@ -45,25 +57,6 @@ graph TD
     CFG -->|sub| COORD
     COORD -..->|LWT offline| T_STATE
     COORD -->|registro + confirmación| EL
-```
-
-### Flujo de detección GPD local (modo online)
-
-```mermaid
-sequenceDiagram
-    participant W as gpd_stream_worker
-    participant B as Broker MQTT
-    participant C as mqtt_coordinator
-    participant EL as EventLogger
-
-    W->>B: publish({id}/events/detected, payload)
-    B->>C: on_message()
-    C->>C: _manejar_deteccion_gpd_local()
-    C->>B: publish(cmd_response, "accepted")
-    C->>C: _run_gpd_extraction_pipeline() [hilo]
-    C->>C: extraer_y_subir_evento()
-    C->>B: publish(cmd_response, "completed")
-    C->>EL: actualizar_confirmacion(ts, confirmado=True)
 ```
 
 ---
@@ -76,8 +69,10 @@ Default: `rsa/seismic/smart/{id}/...`
 | Topic key | Template completo | QoS | Retain | Dirección |
 |---|---|---|---|---|
 | `telemetry_state` | `…/{id}/telemetry/state` | 1 | ✅ | Pub |
-| `telemetry_health` | `…/{id}/telemetry/health` | 1 | ❌ | Pub |
-| `status_acquisition` | `…/{id}/status/acquisition` | 1 | ❌ | Pub (cada 60s) |
+| `telemetry_health` | `…/{id}/telemetry/health` | 1 | ❌ | Pub (cada 300s) |
+| `status_acquisition` | `…/{id}/status/acquisition` | 1 | ✅ | Pub (cada 300s) |
+| `status_sensor` | `…/{id}/status/sensor` | 1 | ✅ | Pub (cada 300s) |
+| `status_drive` | `…/{id}/status/drive` | 1 | ✅ | Pub (cada 300s) |
 | `cmd_execute` | `…/{id}/cmd/+` | 1 | — | Sub |
 | `cmd_broadcast` | `…/broadcast/cmd/+` | 1 | — | Sub |
 | `cmd_response` | `…/{id}/cmd/{task_name}/res` | 1 | ❌ | Pub |
@@ -94,7 +89,7 @@ Default: `rsa/seismic/smart/{id}/...`
 Publicado en: conexión (`"online"`), inicio (`"on"`), shutdown (`"offline"`), y como LWT.
 
 ```json
-{"status": "online", "timestamp": "2024-01-15T19:30:45Z"}
+{"status": "online", "timestamp": "2026-09-14T18:03:58Z"}
 ```
 
 ### Health (`telemetry/health`) — cada 300 segundos
@@ -107,33 +102,60 @@ Publicado en: conexión (`"online"`), inicio (`"on"`), shutdown (`"offline"`), y
   "cpu_temp_c": 52.3,
   "throttled": "0x0",
   "uptime_s": 3600,
-  "timestamp": "2024-01-15T19:30:45Z"
+  "timestamp": "2026-09-14T18:03:58Z"
 }
 ```
 
-| Métrica | Fuente | Fallback |
-|---|---|---|
-| `disk_percent` | `os.statvfs('/')` | `-1` |
-| `ram_percent` | `/proc/meminfo` (MemTotal - MemAvailable) | `-1` |
-| `load_avg_15m` | `os.getloadavg()[2]` | `-1` |
-| `cpu_temp_c` | `vcgencmd measure_temp` | `-1` |
-| `throttled` | `vcgencmd get_throttled` | `"unknown"` |
-
-### Status Acquisition (`status/acquisition`) — cada 60 segundos (Watchdog)
+### Status Acquisition (`status/acquisition`) — cada 300 segundos (Watchdog)
 
 Auditado mediante `AcquisitionWatchdog` sobre el Ring Buffer en disco (`/home/rsa/data/ring-buffer/`):
 
 ```json
 {
   "status": "ok",
-  "last_frame_utc": "2026-09-02T21:51:09Z",
-  "age_seconds": 1.6,
+  "last_frame_utc": "2026-09-14T18:03:58Z",
+  "age_seconds": 0.3,
   "station_id": "DEV0",
-  "timestamp": "2026-09-02T21:51:10Z"
+  "timestamp": "2026-09-14T18:03:58Z"
 }
 ```
 
 Si la adquisición se estanca (`age_seconds > 300 s`), emite `status: "warning"`, `reason: "stale_data"`.
+
+### Status Sensor (`status/sensor`) — cada 300 segundos (SensorWatchdog)
+
+Auditado mediante `SensorWatchdog` ejecutando el diagnóstico en reposo con el acelerómetro triaxial:
+
+```json
+{
+  "status": "ok",
+  "ax": 0.4414,
+  "ay": 0.1484,
+  "az": 9.5807,
+  "clock_source": "RPi",
+  "clock_error": null,
+  "reason": "nominal",
+  "station_id": "DEV0",
+  "timestamp": "2026-09-14T18:03:58Z"
+}
+```
+
+### Status Drive (`status/drive`) — cada 300 segundos (DriveWatchdog)
+
+Auditado mediante `DriveWatchdog` inspeccionando subidas pendientes, archivos protegidos y disco libre:
+
+```json
+{
+  "status": "warning",
+  "pending_mseed": 0,
+  "failed_uploads_protected": 1,
+  "free_disk_percent": 20.8,
+  "last_upload_utc": "2026-09-14 18:00:45",
+  "reason": "upload_retry_retained",
+  "station_id": "DEV0",
+  "timestamp": "2026-09-14T18:03:58Z"
+}
+```
 
 ---
 
@@ -144,9 +166,12 @@ Recibidos vía `cmd/+`, procesados por `CommandDispatcher`:
 | Comando | Handler | Estado |
 |---|---|---|
 | `restart_acquisition` | `_cmd_restart_acquisition()` | ❌ TODO |
+| `stop_acquisition_safety` | `_cmd_stop_acquisition_safety()` | ✅ Funcional (Parada de emergencia `systemctl stop rsa-acelerografo`) |
 | `cleanup_files` | `_cmd_cleanup_files()` | ❌ TODO |
 | `get_status` | `_cmd_get_status()` | ✅ Funcional |
 | `get_acquisition_status` | `_cmd_get_acquisition_status()` | ✅ Funcional (Watchdog Ring Buffer) |
+| `get_sensor_status` | `_cmd_get_sensor_status()` | ✅ Funcional (SensorWatchdog) |
+| `get_drive_status` | `_cmd_get_drive_status()` | ✅ Funcional (DriveWatchdog) |
 | `extract_event` | `_cmd_extract_event()` | ✅ Funcional (Asíncrono + CSV) |
 
 **Flujo de comando regular**:
