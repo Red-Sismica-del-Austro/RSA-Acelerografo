@@ -28,8 +28,13 @@ class SensorWatchdog:
         if wrapper_path:
             self.wrapper_path = wrapper_path
         else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.wrapper_path = os.path.join(base_dir, "acelerografo", "comprobar_registro_wrapper.py")
+            project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
+            if not project_local_root:
+                scripts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                project_local_root = os.path.dirname(scripts_dir)
+            self.wrapper_path = os.path.join(
+                project_local_root, "scripts", "acelerografo", "comprobar_registro_wrapper.py"
+            )
 
     def evaluar_integridad(self, station_id: str) -> dict:
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -46,12 +51,14 @@ class SensorWatchdog:
             }
 
         try:
-            # Asegurar herencia de entorno y PROJECT_LOCAL_ROOT defensivo si no está definido
+            # Asegurar herencia de entorno y propagar PROJECT_LOCAL_ROOT
             env = os.environ.copy()
             if "PROJECT_LOCAL_ROOT" not in env:
-                # scripts/operation/mqtt -> raíz del proyecto es 3 niveles arriba
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                env["PROJECT_LOCAL_ROOT"] = os.path.dirname(base_dir)
+                project_local_root = os.getenv("PROJECT_LOCAL_ROOT")
+                if not project_local_root:
+                    scripts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    project_local_root = os.path.dirname(scripts_dir)
+                env["PROJECT_LOCAL_ROOT"] = project_local_root
 
             res = subprocess.run(
                 [sys.executable, self.wrapper_path],
