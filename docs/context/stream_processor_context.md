@@ -78,12 +78,14 @@ StreamProcessor(
 | `run()` | Inicia el daemon. Ejecuta `_abrir_pipe_con_retry()` con backoff exponencial y procesa el bucle de lectura. Bloquea hasta SIGTERM/SIGINT o salida controlada por timeout. |
 | `stop()` | Solicita parada ordenada. Thread-safe. |
 
-### Métodos internos de apertura del FIFO
+### Métodos internos de apertura del FIFO y Auto-Recuperación (Self-Healing)
 
 | Método | Descripción |
 |--------|-------------|
 | `_abrir_pipe_con_retry()` | Bucle de reintentos con backoff exponencial (0.5s a 8.0s, máx 120s). Tolera arranques asíncronos de `registro_continuo` y permisos transitorios denegados. |
 | `_abrir_pipe()` | Apertura directa y síncrona de `/tmp/my_pipe` (preservada para tests y compatibilidad). |
+| `_pipe_es_valido()` | Comprueba si `self._fd` sigue vinculado al mismo inodo en disco (`os.fstat(fd).st_ino == os.stat(path).st_ino`). Detecta inodos huérfanos producidos por `rm -f /tmp/my_pipe` en `ExecStartPre` de systemd. |
+| `_reconectar_pipe()` | Cierra el descriptor huérfano y reabre automáticamente el nuevo named pipe cuando reaparece tras un reinicio de `registro_continuo`, sin requerir reinicio de Supervisor. |
 
 ### Atributos de estadísticas (solo lectura)
 
@@ -164,6 +166,8 @@ python3 stream_processor.py --dry-run --verbose
 | `[PIPE_PERMISSION_RETRY]` | WARNING | Permisos denegados; reintentando con backoff exponencial |
 | `[PIPE_OPEN]` | INFO | Pipe abierto con éxito |
 | `[PIPE_CLOSE]` | INFO | Pipe cerrado |
+| `[PIPE_RECONNECT]` | WARNING | Inodo huérfano detectado; iniciando reconexión |
+| `[PIPE_RECONNECTED]` | INFO | Pipe reabierto con éxito tras recreación en disco |
 | `[STREAM_PIPE_FAIL]` | ERROR | Timeout de espera alcanzado; salida limpia |
 | `[PIPE_READ_ERROR]` | ERROR | Error de lectura del pipe |
 | `[FRAME_INVALID]` | WARNING | Trama descartada por timestamp inválido |
@@ -194,8 +198,9 @@ python3 scripts/operation/streaming/test_stream_processor.py
 | Flujo completo con RingBufferStore real | 1 |
 | Señales y cierre limpio | 3 |
 | Estadísticas | 2 |
+| Auto-recuperación (Self-Healing) del pipe | 3 |
 
-**Total: 20 tests**
+**Total: 23 tests**
 
 ---
 
