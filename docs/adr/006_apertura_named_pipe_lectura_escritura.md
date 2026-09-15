@@ -3,7 +3,8 @@ id: ADR-006
 titulo: Apertura del Named Pipe en Modo Lectura-Escritura (O_RDWR) para Evitar EOF
 estado: Aceptado
 fecha: 2026-06-24
-temas: [acelerografo, streaming, pipe, named-pipe, optimizacion]
+actualizado: 2026-09-15
+temas: [acelerografo, streaming, pipe, named-pipe, optimizacion, self-healing]
 entorno: [acelerografo]
 ---
 
@@ -11,7 +12,7 @@ entorno: [acelerografo]
 
 ## Estado
 
-**Aceptado** | Fecha: 2026-06-24
+**Aceptado** | Fecha: 2026-06-24 | Actualizado: 2026-09-15
 
 ## Contexto
 
@@ -47,8 +48,26 @@ Esta técnica, ampliamente utilizada en sistemas Unix para daemons de logging y 
 
 *   **Persistencia del Descriptor:** `StreamProcessor` abre el pipe una sola vez al iniciar su ciclo de ejecución (`run()`) y lo mantiene abierto hasta su detención.
 *   **Gestión de Datos:** Se implementó un acumulador de bytes interno (`bytearray`) en el procesador para manejar lecturas parciales en el pipe de forma segura cuando el buffer no tiene tramas completas de 2506 bytes.
-*   **Robustez de Escritor:** El programa en C puede cerrarse o reiniciarse sin afectar al daemon Python receptor, el cual simplemente queda en espera pasiva (bloqueante) de nuevos bytes en `os.read()`.
+*   **Robustez de Escritor:** El programa en C puede cerrarse o reiniciarse sin afectar al daemon Python receptor, el cual simplemente queda en espera pasiva de nuevos bytes en `os.read()`.
+
+---
+
+## Actualización (2026-09-15): Auto-Recuperación (Self-Healing) ante Recreación de Inodo
+
+### Contexto de Producción Descubierto
+Durante las pruebas de parada de contingencia (`cmd/stop_acquisition_safety`), se identificó una limitación crítica en el supuesto de persistencia del descriptor:
+Cuando `rsa-acelerografo.service` se reinicia, su directiva `ExecStartPre=/bin/rm -f /tmp/my_pipe` elimina el archivo del sistema de ficheros (`unlink`). Posteriormente, `registro_continuo` crea un nuevo FIFO en `/tmp/my_pipe` con un **inodo diferente**.
+En sistemas POSIX, aunque `StreamProcessor` mantenga el descriptor abierto con `os.O_RDWR`, dicho descriptor queda vinculado al **inodo huérfano original (`deleted`)**. El proceso continúa en ejecución en Supervisor pero recibiendo lecturas vacías indefinidamente, quedando completamente sordo al nuevo FIFO recreado.
+
+### Enmienda y Decisión Complementaria
+Se complementa la arquitectura incorporando un mecanismo autónomo de **Self-Healing** dentro de `StreamProcessor`:
+1. **Validación Periódica de Inodo (`_pipe_es_valido`)**: Comprueba cada 1 segundo (ante ausencia de tramas o `BlockingIOError`) si `os.fstat(self._fd).st_ino == os.stat(self._pipe_path).st_ino`.
+2. **Reconexión en Caliente (`_reconectar_pipe`)**: Ante eliminación o divergencia de inodos, cierra el descriptor huérfano, purga buffers y entra en espera con backoff para reabrir automáticamente el nuevo FIFO en cuanto reaparece.
+3. **Autonomía Operativa**: Erradica la necesidad de reiniciar manualmente los daemons en Supervisor tras reinicios o caídas de `registro_continuo`.
+
+---
 
 ## Referencias
 
-*   Contexto técnico relacionado: [stream_processor_context.md](file:///c:/Users/miltonrsa/Documents/git/rsa/RSA-Acelerografo/docs/context/stream_processor_context.md)
+*   Contexto técnico relacionado: [`docs/context/stream_processor_context.md`](../context/stream_processor_context.md)
+*   Diagnóstico técnico de soporte: [`docs/analysis/2026-09-01_diagnostico_parada_adquisicion_cha01.md`](../analysis/2026-09-01_diagnostico_parada_adquisicion_cha01.md)

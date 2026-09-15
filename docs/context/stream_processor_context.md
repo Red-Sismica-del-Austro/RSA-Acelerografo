@@ -1,55 +1,52 @@
-# Contexto Técnico: stream_processor.py
+---
+proyecto: acelerografo-DEV00
+tipo: contexto_tecnico
+archivo: scripts/operation/streaming/stream_processor.py
+temas: [streaming, ring_buffer, named_pipe, self_healing, inodo, shm, supervisor]
+generado: 2026-06-17
+actualizado: 2026-09-15
+---
+# stream_processor.py — Contexto para Agentes IA
 
-**Archivo:** `scripts/operation/streaming/stream_processor.py`  
-**Módulo:** `streaming.stream_processor`  
-**Fase:** 3 del Plan de Implementación Ring Buffer  
-**Fecha de creación:** 2026-06-17
+> Daemon de streaming que lee tramas continuas de 2506 bytes desde el FIFO `/tmp/my_pipe` hacia el Ring Buffer en disco y la memoria compartida Seqlock, con arquitectura resiliente auto-recuperable (self-healing) ante recreaciones de pipe o caídas del productor.
+
+**Ruta**: `scripts/operation/streaming/stream_processor.py`  
+**LOC**: ~720 | **Lenguaje**: Python 3 | **Dependencias**: `core.frame_decoder`, `streaming.ring_buffer_store`, `streaming.shared_memory_publisher`  
+**Proceso**: Daemon gestionado por Supervisor (`stream_processor`).
 
 ---
 
-## Propósito
+## Arquitectura y Flujo de Procesamiento
 
-Daemon que lee tramas de 2506 bytes desde el named pipe `/tmp/my_pipe` y las almacena en el `RingBufferStore` de forma continua. Actúa como puente entre el programa C `registro_continuo_4.5.0.c` (productor) y el ring buffer en disco (consumidor).
+```mermaid
+graph TD
+    subgraph "Productor C (systemd: rsa-acelerografo)"
+        RC["registro_continuo_4.5.0.c<br/>(Escritura SPI 2506 bytes/s)"]
+    end
 
----
+    subgraph "Canal IPC FIFO"
+        PIPE["/tmp/my_pipe<br/>(Named Pipe / inodo activo)"]
+    end
 
-## Dependencias
+    subgraph "Daemon stream_processor (Supervisor)"
+        FD["_fd (O_RDWR | O_NONBLOCK)"]
+        VAL{"_pipe_es_valido()<br/>fstat(fd) == stat(path)?"}
+        RECON["_reconectar_pipe()<br/>(Cierra huérfano y reabre)"]
+        ACC["_acumulador (bytearray)<br/>Lecturas parciales FRAME_SIZE"]
+        DEC["decode_timestamp()<br/>Mitigación dsPIC bug"]
+        SHM["SharedMemoryPublisher<br/>/dev/shm/rsa_current_frame"]
+        RING["RingBufferStore<br/>/home/rsa/data/ring-buffer/ring_*.bin"]
+    end
 
-| Módulo | Función |
-|--------|---------|
-| `streaming.ring_buffer_store.RingBufferStore` | Almacén rotativo en disco |
-| `core.frame_decoder.decode_timestamp` | Validación del timestamp de cada trama |
-| `core.frame_decoder.FRAME_SIZE` | Constante: 2506 bytes por trama |
-
-No tiene dependencias externas adicionales más allá de la biblioteca estándar de Python.
-
----
-
-## Comportamiento del Named Pipe
-
-El programa C abre el pipe con `O_WRONLY | O_NONBLOCK` y cierra el fd tras cada trama. Para evitar el ciclo EOF/SIGPIPE que esto genera en el lector, el `StreamProcessor` abre el pipe con **`os.O_RDWR`** ("Opción B"):
-
-- El proceso mismo mantiene el extremo de escritura abierto.
-- El fd nunca recibe EOF aunque el escritor C cierre.
-- No es necesario reabrir el pipe entre tramas.
-
----
-
-## Flujo de Procesamiento
-
-```
-registro_continuo.c
-    │ escribe 2506 bytes (O_WRONLY | O_NONBLOCK)
-    ▼
-/tmp/my_pipe  ←──────── StreamProcessor._fd (O_RDWR)
-    │
-    ▼
-_acumulador (bytearray)  ← maneja lecturas parciales
-    │ cuando len >= FRAME_SIZE
-    ▼
-_procesar_trama(raw_frame)
-    ├── decode_timestamp() → ValueError → descarta + warning
-    └── ring_store.write_frame(raw_frame, timestamp) → archivo .bin
+    RC -->|Escribe trama| PIPE
+    PIPE -->|Lee chunk| FD
+    FD --> VAL
+    VAL -->|Inodo huérfano / rm| RECON
+    RECON -.->|Reabre nuevo inodo| PIPE
+    VAL -->|Inodo vigente| ACC
+    ACC -->|Trama completa| DEC
+    DEC -->|Publica Seqlock| SHM
+    DEC -->|Escribe binario| RING
 ```
 
 ---

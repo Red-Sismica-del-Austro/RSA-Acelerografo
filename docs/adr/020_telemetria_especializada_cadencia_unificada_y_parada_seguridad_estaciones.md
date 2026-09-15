@@ -3,6 +3,7 @@ id: ADR-020
 titulo: Telemetría Especializada, Cadencia Unificada a 5 Minutos y Parada Remota de Contingencia en Estaciones Acelerográficas
 estado: Aceptado
 fecha: 2026-09-14
+actualizado: 2026-09-15
 temas: [mqtt, telemetria, watchdog, sensor, drive, resiliencia, contingencia, acelerografo]
 entorno: acelerografo
 ---
@@ -11,7 +12,7 @@ entorno: acelerografo
 
 ## Estado
 
-**Aceptado** | Fecha: 2026-09-14
+**Aceptado** | Fecha: 2026-09-14 | Actualizado: 2026-09-15
 
 ---
 
@@ -77,6 +78,7 @@ Registrado en `CommandDispatcher`. Al recibir `rsa/seismic/smart/{id}/cmd/stop_a
 
 ### 4. Auditoría de Google Drive y Espacio en Disco (`DriveWatchdog`)
 Inspecciona de forma dual los formatos de registro de subida (`drive_status.json` y `uploaded_files_registry.json`), alertando ante acumulación de archivos (`pending_mseed > 3`) o fallos repetidos retenidos (`failed_uploads_protected > 0`), reportando el porcentaje de disco libre derivado de `shutil.disk_usage`.
+*Actualización (2026-09-15)*: Para erradicar falsos positivos por registros históricos huérfanos de archivos que ya fueron rotados o purgados, `failed_uploads_protected` valida la existencia física real de cada archivo en disco (`f in archivos_disco`), ignorando claves obsoletas en el JSON.
 
 ### 5. Despliegue Limpio y Aislamiento de Entorno
 Actualizado `update.sh` para sincronizar `scripts/operation/acelerografo/` hacia `$PROJECT_LOCAL_ROOT/scripts/acelerografo/`, garantizando que `comprobar_registro_wrapper.py` exista en producción sin requerir acceso al árbol de Git en runtime.
@@ -89,6 +91,7 @@ Actualizado `update.sh` para sincronizar `scripts/operation/acelerografo/` hacia
 - **Ahorro drástico de datos móviles**: Reducción de más del 75% en ráfagas de red al unificar las publicaciones a un único tick cada 5 minutos.
 - **Detección temprana de anomalías físicas**: Identificación inmediata de sensores descalibrados o desconectados antes de que contaminen catálogos sísmicos.
 - **Acción remota protectora**: Capacidad de apagar remotamente la adquisición continua ante fallas no recuperables sin requerir acceso interactivo SSH.
+- **Inmunidad ante falsos positivos de sincronización**: El auditor de Google Drive valida presencia física en disco, evitando que fallos transitorios históricos retengan estados de alarma indefinidos.
 - **Interoperabilidad completa con TIG**: Alimentación directa y homogénea para Telegraf y el motor jerárquico de alertas en Grafana (ADR-019).
 
 ### Negativas / Deuda Técnica
