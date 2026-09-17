@@ -1,9 +1,9 @@
 # gestor_archivos_acq.py — Contexto para Agentes IA
 
-> Script Python que gestiona almacenamiento de archivos binarios (`.dat`) y miniSEED (`.mseed`) en el sistema de adquisición sísmica. Opera en dos modos: **online** (subida a Google Drive + retención + control de espacio) y **offline** (maximiza almacenamiento local). Soporta modo dry-run para simulación.
+> Script Python que gestiona el almacenamiento, sincronización con Google Drive y políticas de retención de archivos binarios (`.dat`), miniSEED continuo (`.mseed`) y eventos extraídos (`.mseed`) en el sistema de adquisición sísmica. Opera en dos modos: **online** (subida a Google Drive + retención temporal + control de espacio + saneamiento del registro JSON) y **offline** (maximiza almacenamiento local). Soporta modo dry-run para simulación.
 
 **Ruta**: `scripts/operation/drive/gestor_archivos_acq.py`
-**LOC**: 683 | **Lenguaje**: Python 3 | **Ejecución**: Periódica (cron/supervisor)
+**LOC**: ~850 | **Lenguaje**: Python 3 | **Ejecución**: Periódica (cron/supervisor)
 
 ---
 
@@ -46,15 +46,17 @@ graph TD
 
 ```mermaid
 graph TD
-    A["Escanear archivos .dat y .mseed"] --> B["Retención temporal"]
+    A["Escanear .dat, .mseed y eventos"] --> B["Retención temporal"]
     B -->|"continuous > N días"| C["Eliminar (excepto más reciente)"]
+    B -->|"event > N días"| C1["Eliminar eventos antiguos"]
     C --> D["Control de espacio"]
     D -->|"< umbral_minimo"| E["Eliminar TODOS continuous<br>(excepto más reciente)"]
-    E -->|"aún bajo"| F["Eliminar mseed más antiguo"]
-    D -->|"< umbral_critico"| G["Eliminar mseed FIFO"]
+    E -->|"aún bajo"| F["Eliminar mseed continuo más antiguo"]
+    D -->|"< umbral_critico"| G["Eliminar mseed continuo FIFO"]
+    G -->|"aún bajo"| H["Eliminar eventos extraídos FIFO"]
 ```
 
-**Política default offline**: retener continuous 7 días, sin subida.
+**Política default offline**: retener continuous 7 días, event 30 días, sin subida.
 
 ---
 
@@ -65,21 +67,26 @@ graph TD
     A["Verificar internet<br>(8.8.8.8:53)"] -->|OK| B["Subida a Google Drive"]
     B --> C["Retención temporal"]
     C --> D["Control de espacio"]
+    D --> E["Saneamiento Registro Espejo"]
 
-    B --> B1["Filtrar ya_subidos<br>(drive_status_manager)"]
+    B --> B1["Filtrar ya_subidos<br>(continuous, mseed, event)"]
     B1 --> B2["Autenticar Drive<br>(una vez)"]
-    B2 --> B3["Subir archivos<br>(oldest first)"]
+    B2 --> B3["Subir archivos<br>(oldest first a sus carpetas)"]
 
-    C -->|"continuous > N días"| C1["Eliminar con verificación<br>(protegidos por fallo?)"]
+    C -->|"continuous > N días"| C1["Eliminar con verificación"]
     C -->|"mseed > N días"| C2["Eliminar con verificación"]
+    C -->|"event > N días"| C3["Eliminar con verificación"]
 
     D -->|"< umbral_minimo"| D1["Eliminar continuous ordenados"]
     D1 -->|"aún bajo"| D2["Eliminar 1 mseed más antiguo"]
     D -->|"< umbral_critico"| D3["Eliminar TODOS continuous"]
-    D3 -->|"aún bajo"| D4["Eliminar mseed FIFO hasta umbral"]
+    D3 -->|"aún bajo"| D4["Eliminar mseed continuo FIFO"]
+    D4 -->|"aún bajo"| D5["Eliminar eventos extraídos FIFO"]
+    
+    E --> E1["limpiar_archivos_inexistentes<br>(poda claves huérfanas)"]
 ```
 
-**Política default online**: subir mseed, retener continuous 30 días, mseed 30 días.
+**Política default online**: subir `["mseed", "event"]`, retener continuous 30 días, mseed 30 días, event 30 días.
 
 ### Modo ONLINE (sin conexión)
 
@@ -160,17 +167,17 @@ JSON persistente en `$PROJECT_LOCAL_ROOT/log-files/uploaded_files_registry.json`
     "umbrales": { "minimo": 10, "critico": 5 },
     "politicas": {
       "online": {
-        "subir": ["mseed"],
-        "retener_dias": { "continuous": 30, "mseed": 30 }
+        "subir": ["mseed", "event"],
+        "retener_dias": { "continuous": 30, "mseed": 30, "event": 30 }
       },
       "offline": {
         "subir": [],
-        "retener_dias": { "continuous": 7 }
+        "retener_dias": { "continuous": 7, "event": 30 }
       }
     }
   },
   "drive": {
-    "carpetas": { "continuos_id": "...", "mseed_id": "..." },
+    "carpetas": { "continuos_id": "...", "mseed_id": "...", "events_id": "..." },
     "config": { "max_reintentos": 3, "tiempo_espera": 2 }
   }
 }
@@ -218,10 +225,12 @@ python3 gestor_archivos_acq.py --noauth_local_webserver
 
 ## Orden de Prioridad de Eliminación
 
-1. **continuous** antiguos (> retención días) — excepto más reciente
-2. **mseed** antiguos (> retención días) — excepto protegidos por fallo
-3. **continuous** por espacio (todos excepto más reciente)
-4. **mseed** por espacio (FIFO, uno a la vez, verificando protección)
+1. **continuous** antiguos (> retención días) — excepto más reciente activo
+2. **mseed continuo** antiguos (> retención días) — excepto protegidos por fallo
+3. **eventos extraídos** antiguos (> retención días) — excepto protegidos por fallo
+4. **continuous** por espacio mínimo (< 10%) — ordenados por fecha
+5. **mseed continuo** por espacio mínimo/crítico (< 10% / < 5%) — FIFO, verificando protección
+6. **eventos extraídos** por espacio crítico (< 5%, último recurso) — FIFO, verificando protección
 
 ---
 
