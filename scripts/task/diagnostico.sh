@@ -27,6 +27,7 @@ mkdir -p "$LOG_DIR"
 
 # Parseo de argumentos
 QUIET=false
+RAW_REGISTRY=false
 TARGET_CHANNEL="all"
 
 for arg in "$@"; do
@@ -34,20 +35,24 @@ for arg in "$@"; do
         -q|--quiet)
             QUIET=true
             ;;
+        --raw)
+            RAW_REGISTRY=true
+            ;;
         acquisition|sensor|drive|all)
             TARGET_CHANNEL="$arg"
             ;;
         -h|--help)
-            echo "Uso: diagnostico [--quiet|-q] [all|acquisition|sensor|drive]"
+            echo "Uso: diagnostico [--quiet|-q] [--raw] [all|acquisition|sensor|drive]"
             echo "  all          : Ejecuta diagnóstico completo (por defecto)"
             echo "  acquisition  : Inspecciona servicio systemd, stream_processor, pipe y ring buffer"
             echo "  sensor       : Ejecuta wrapper y evalúa acelerómetro y reloj"
             echo "  drive        : Verifica sincronización, backlog MiniSEED y almacenamiento"
+            echo "  --raw        : Muestra el volcado completo de subidas sin sintetizar"
             echo "  --quiet, -q  : Modo silencioso (no imprime a terminal, solo escribe a $REPORT_FILE)"
             exit 0
             ;;
         *)
-            echo "Advertencia: Parámetro desconocido '$arg'. Opciones válidas: all, acquisition, sensor, drive, --quiet"
+            echo "Advertencia: Parámetro desconocido '$arg'. Opciones válidas: all, acquisition, sensor, drive, --quiet, --raw"
             ;;
     esac
 done
@@ -210,16 +215,85 @@ diagnostico_sensor() {
 diagnostico_drive() {
     echo "--- SECCIÓN: DIAGNÓSTICO DRIVE ---"
     echo "[1. Registro de subidas a Google Drive]"
-    if [ -f "$LOG_DIR/uploaded_files_registry.json" ]; then
-        cat "$LOG_DIR/uploaded_files_registry.json"
-        echo ""
-    elif [ -f "$LOG_DIR/drive_status.json" ]; then
-        cat "$LOG_DIR/drive_status.json"
+    if [ "$RAW_REGISTRY" = true ]; then
+        if [ -f "$LOG_DIR/uploaded_files_registry.json" ]; then
+            cat "$LOG_DIR/uploaded_files_registry.json"
+        elif [ -f "$LOG_DIR/drive_status.json" ]; then
+            cat "$LOG_DIR/drive_status.json"
+        else
+            echo "No se encontró archivo de registro de subidas"
+        fi
         echo ""
     else
-        echo "No se encontró archivo de registro de subidas (uploaded_files_registry.json ni drive_status.json)"
+        # Modo sintético estructurado
+        if [ -f "$LOG_DIR/uploaded_files_registry.json" ] || [ -f "$LOG_DIR/drive_status.json" ]; then
+            PYTHON_EXEC=""
+            if [ -x "$VENV_PYTHON" ]; then
+                PYTHON_EXEC="$VENV_PYTHON"
+            elif command -v python3 >/dev/null 2>&1; then
+                PYTHON_EXEC="python3"
+            fi
+
+            if [ -n "$PYTHON_EXEC" ]; then
+                "$PYTHON_EXEC" - "$PROJECT_LOCAL_ROOT" "$LOG_DIR" << 'EOF'
+import sys, os
+project_root = sys.argv[1]
+log_dir = sys.argv[2]
+for p in [os.path.join(project_root, "scripts", "drive"), os.path.join(project_root, "scripts", "operation", "drive")]:
+    if os.path.isdir(p) and p not in sys.path:
+        sys.path.insert(0, p)
+try:
+    import drive_status_manager as dsm
+    resumen = dsm.obtener_resumen_diagnostico(log_dir, max_ultimos=5)
+    tot = resumen["totales"]
+    print(f"Estado de registro     : {log_dir}/uploaded_files_registry.json")
+    print(f"Totales indexados      : {tot['exitosos']} exitosos | {tot['fallidos']} fallidos")
+    print("")
+    print("Métricas por Categoría:")
+    for tipo, info in resumen["detalle_por_tipo"].items():
+        if info["exitosos"] > 0 or info["fallidos"] > 0:
+            print(f"  • {tipo:<11}: {info['exitosos']:>4} subidos | {info['fallidos']:>2} fallidos")
+    print("")
+    print("Últimos Archivos Subidos:")
+    hay_ultimos = False
+    for tipo, info in resumen["detalle_por_tipo"].items():
+        if info["ultimos"]:
+            hay_ultimos = True
+            print(f"  [{tipo}]")
+            for f_name, f_time in info["ultimos"]:
+                print(f"    - {f_name} ({f_time})")
+    if not hay_ultimos:
+        print("  (Sin registros de subida recientes)")
+    print("")
+    print("Estado de Fallos Retenidos:")
+    if resumen["fallidos_activos"]:
+        for item in resumen["fallidos_activos"]:
+            print(f"  ⚠️ [{item['tipo']}] {item['archivo']} (falló: {item['fecha']})")
+    else:
+        print("  ✓ Sin archivos fallidos retenidos.")
+except Exception as e:
+    print(f"Aviso: No se pudo generar resumen con drive_status_manager ({e}). Mostrando extracto:")
+    status_file = os.path.join(log_dir, "uploaded_files_registry.json")
+    if not os.path.isfile(status_file):
+        status_file = os.path.join(log_dir, "drive_status.json")
+    if os.path.isfile(status_file):
+        with open(status_file, "r") as f:
+            for _ in range(25):
+                line = f.readline()
+                if not line: break
+                sys.stdout.write(line)
+        print("... [usa --raw para ver el archivo completo]")
+EOF
+            else
+                echo "Intérprete Python no disponible para sintetizar registro. Extracto inicial:"
+                head -n 25 "$LOG_DIR/uploaded_files_registry.json" 2>/dev/null || head -n 25 "$LOG_DIR/drive_status.json" 2>/dev/null
+                echo "... [usa --raw para ver el archivo completo]"
+            fi
+        else
+            echo "No se encontró archivo de registro de subidas (uploaded_files_registry.json ni drive_status.json)"
+        fi
+        echo ""
     fi
-    echo ""
 
     echo "[2. Archivos MiniSEED en cola de subida]"
     if [ -d /home/rsa/data/mseed ]; then

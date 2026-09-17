@@ -51,7 +51,13 @@ from subir_archivo import (
 )
 
 # Importar el gestor de estado de subidas
-from drive_status_manager import esta_protegido, ya_fue_subido
+from drive_status_manager import (
+    esta_protegido,
+    ya_fue_subido,
+    limpiar_archivos_inexistentes,
+    obtener_estadisticas
+)
+import drive_status_manager as dsm
 
 # Configurar acceso a librería de logging estructurado
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -254,8 +260,9 @@ def main():
     # Obtener umbral de espacio libre mínimo (por defecto 10%)
     min_free_space_threshold = config_dispositivo.get("dispositivo", {}).get("umbral_espacio_minimo", 10)
 
-    # Detectar modo dry-run
+    # Detectar argumentos de modo especial
     dry_run = "--dry-run" in sys.argv
+    purge_registry = "--purge-registry" in sys.argv
 
     # Inicializa el logger estructurado
     logger = obtener_logger_estructurado(
@@ -268,6 +275,99 @@ def main():
 
     if dry_run:
         logger.warning("MODO DRY-RUN ACTIVADO - Las operaciones se simularán sin realizar cambios reales.")
+
+    # Si se invoca exclusivamente para purgar el registro:
+    if purge_registry:
+        logger.init(f"modo=purge_registry | id_estacion={id_estacion}")
+        print("=" * 65)
+        print("SANEAMIENTO DIRECTO DEL REGISTRO DE SUBIDAS (uploaded_files_registry.json)")
+        print(f"Estación: {id_estacion} | Modo Dry-Run: {dry_run}")
+        print("=" * 65)
+
+        directorios_limpieza = {}
+        if mseed_directory and os.path.isdir(mseed_directory):
+            directorios_limpieza["mseed"] = mseed_directory
+        if binary_directory and os.path.isdir(binary_directory):
+            directorios_limpieza["continuous"] = binary_directory
+
+        eventos_dir = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "")
+        if eventos_dir and os.path.isdir(eventos_dir):
+            directorios_limpieza["event"] = eventos_dir
+
+        tmp_dir = config_dispositivo.get("directorios", {}).get("archivos_temporales", "")
+        if tmp_dir and os.path.isdir(tmp_dir):
+            directorios_limpieza["tmp"] = tmp_dir
+
+        if log_directory and os.path.isdir(log_directory):
+            directorios_limpieza["log"] = log_directory
+
+        print("Directorios activos inspeccionados:")
+        for t, d in directorios_limpieza.items():
+            print(f"  • {t:<11}: {d}")
+        print("")
+
+        status_data = dsm._leer_json(log_directory)
+        stats = obtener_estadisticas(log_directory)
+
+        print("Estado actual del archivo de registro JSON:")
+        print(f"  • Total exitosos registrados  : {stats['exitosos']['total']}")
+        for tipo in dsm.TIPOS_ARCHIVO:
+            c = stats['exitosos'][tipo]
+            if c > 0:
+                print(f"      - {tipo:<11}: {c} archivos")
+        print(f"  • Total fallidos registrados  : {stats['fallidos']['total']}")
+        for tipo in dsm.TIPOS_ARCHIVO:
+            c = stats['fallidos'][tipo]
+            if c > 0:
+                print(f"      - {tipo:<11}: {c} archivos")
+        print("")
+
+        if dry_run:
+            sim_exitosos = 0
+            sim_fallidos = 0
+            detalles_por_tipo = {}
+            for tipo, d_path in directorios_limpieza.items():
+                p_exit = 0
+                p_fall = 0
+                for f_name in status_data.get("archivos_exitosos", {}).get(tipo, {}):
+                    if not os.path.exists(os.path.join(d_path, f_name)):
+                        sim_exitosos += 1
+                        p_exit += 1
+                for f_name in status_data.get("archivos_fallidos", {}).get(tipo, {}):
+                    if not os.path.exists(os.path.join(d_path, f_name)):
+                        sim_fallidos += 1
+                        p_fall += 1
+                if p_exit > 0 or p_fall > 0:
+                    detalles_por_tipo[tipo] = {"exitosos": p_exit, "fallidos": p_fall}
+
+            print("Evaluación de presencia física en disco:")
+            if sim_exitosos == 0 and sim_fallidos == 0:
+                print("  ✓ Todos los archivos registrados en el JSON existen físicamente en disco.")
+                print("  ✓ Ningún archivo es huérfano (no se requiere poda).")
+            else:
+                print(f"  ⚠️ [SIMULACIÓN] Se podarían {sim_exitosos} exitosos y {sim_fallidos} fallidos huérfanos:")
+                for tipo, det in detalles_por_tipo.items():
+                    print(f"      - {tipo}: {det['exitosos']} exitosos, {det['fallidos']} fallidos inexistentes")
+            logger.summary(dry_run_purge=True, exitosos_podables=sim_exitosos, fallidos_podables=sim_fallidos)
+        else:
+            balance = limpiar_archivos_inexistentes(log_directory, directorios_limpieza, logger)
+            stats_final = obtener_estadisticas(log_directory)
+            print("Resultado de la depuración:")
+            print(f"  • Exitosos huérfanos removidos : {balance.get('exitosos_removidos', 0)}")
+            print(f"  • Fallidos huérfanos removidos : {balance.get('fallidos_removidos', 0)}")
+            print(f"  • Total registros depurados    : {balance.get('total_removidos', 0)}")
+            print("")
+            print("Estado final en registro JSON:")
+            print(f"  • Total exitosos persistentes  : {stats_final['exitosos']['total']}")
+            print(f"  • Total fallidos activos       : {stats_final['fallidos']['total']}")
+            logger.summary(
+                purge_registry="completed",
+                exitosos_purgados=balance.get("exitosos_removidos", 0),
+                fallidos_purgados=balance.get("fallidos_removidos", 0),
+                total_exitosos_final=stats_final["exitosos"]["total"]
+            )
+        print("=" * 65)
+        return
 
     logger.init(f"modo={mode_acq} | id_estacion={id_estacion}")
 
@@ -673,6 +773,56 @@ def main():
 
     else:
         logger.error("main", f"Modo de adquisición desconocido: {mode_acq}")
+
+    # ========== POLÍTICA DE SANEAMIENTO DEL REGISTRO DE SUBIDAS ==========
+    # Purgar de uploaded_files_registry.json los archivos que ya no residen físicamente en disco
+    try:
+        directorios_limpieza = {}
+        if mseed_directory and os.path.isdir(mseed_directory):
+            directorios_limpieza["mseed"] = mseed_directory
+        if binary_directory and os.path.isdir(binary_directory):
+            directorios_limpieza["continuous"] = binary_directory
+
+        eventos_dir = config_dispositivo.get("directorios", {}).get("eventos_extraidos", "")
+        if eventos_dir and os.path.isdir(eventos_dir):
+            directorios_limpieza["event"] = eventos_dir
+
+        tmp_dir = config_dispositivo.get("directorios", {}).get("archivos_temporales", "")
+        if tmp_dir and os.path.isdir(tmp_dir):
+            directorios_limpieza["tmp"] = tmp_dir
+
+        if log_directory and os.path.isdir(log_directory):
+            directorios_limpieza["log"] = log_directory
+
+        if dry_run:
+            status_data = dsm._leer_json(log_directory)
+            sim_exitosos = 0
+            sim_fallidos = 0
+            for tipo, d_path in directorios_limpieza.items():
+                for f_name in status_data.get("archivos_exitosos", {}).get(tipo, {}):
+                    if not os.path.exists(os.path.join(d_path, f_name)):
+                        sim_exitosos += 1
+                for f_name in status_data.get("archivos_fallidos", {}).get(tipo, {}):
+                    if not os.path.exists(os.path.join(d_path, f_name)):
+                        sim_fallidos += 1
+            logger.summary(
+                dry_run_cleanup=True,
+                exitosos_podables=sim_exitosos,
+                fallidos_podables=sim_fallidos
+            )
+        else:
+            balance_limpieza = limpiar_archivos_inexistentes(log_directory, directorios_limpieza, logger)
+            removidos_totales = balance_limpieza.get("total_removidos", 0)
+            if removidos_totales > 0:
+                logger.summary(
+                    registry_cleanup="success",
+                    exitosos_purgados=balance_limpieza.get("exitosos_removidos", 0),
+                    fallidos_purgados=balance_limpieza.get("fallidos_removidos", 0)
+                )
+            else:
+                logger.summary(registry_cleanup="nominal", huerfanos=0)
+    except Exception as e:
+        logger.error("registry_cleanup", str(e))
 
     # Resumen final de ejecución
     logger.summary(ejecucion="completada", modo=mode_acq)
