@@ -65,6 +65,9 @@ diagnostico acquisition
 diagnostico sensor
 diagnostico drive
 
+# Volcado crudo sin sintetizar del registro JSON de subidas
+diagnostico drive --raw
+
 # Modo silencioso (solo escribe a archivo sin imprimir a stdout)
 diagnostico --quiet
 diagnostico -q sensor

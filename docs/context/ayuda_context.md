@@ -71,6 +71,8 @@ graph TD
 | | `sudo resetmaster` | Dispara el pulso físico de reseteo del microcontrolador dsPIC33 maestro ante bloqueos de hardware. |
 | **Google Drive y Sincronización** | `$PROJECT_LOCAL_ROOT/.venv/bin/python3 .../gestor_archivos_acq.py` | Fuerza la ejecución manual inmediata de la sincronización de archivos MiniSEED acumulados. |
 | | `.../gestor_archivos_acq.py --dry-run` | Simula la subida sin modificar Google Drive ni alterar los registros locales. |
+| | `.../gestor_archivos_acq.py --purge-registry` | Poda inmediata del registro JSON de archivos que ya no existen en disco. |
+| | `.../gestor_archivos_acq.py --purge-registry --dry-run` | Simula la poda de huérfanos mostrando el inventario completo sin alterar el JSON. |
 | | `tail -f $PROJECT_LOCAL_ROOT/log-files/gestor_acq.log` | Monitorea en vivo el resultado de las subidas horarias o manuales. |
 | | `cat $PROJECT_LOCAL_ROOT/log-files/uploaded_files_registry.json` | Inspecciona el estado de archivos subidos exitosamente y retenidos/protegidos por error. |
 | **Supervisor (Daemons)** | `sudo supervisorctl status` | Muestra el estado operativo, PID y uptime de los procesos de fondo. |

@@ -111,6 +111,7 @@ Tres niveles de protección antes de eliminar:
 | `calcular_antiguedad_dias(ruta_archivo)` | `(now - mtime).days` |
 | `esta_protegido_por_fallo(nombre, tipo, log_dir)` | Wrapper de `drive_status_manager.esta_protegido()` |
 | `eliminar_archivo_con_verificacion(ruta, tipo, log_dir, logger, dry_run)` | Verifica protección → elimina → log |
+| `limpiar_archivos_inexistentes(log_dir, directorios, logger)` | Compara registro JSON contra disco físico y poda archivos huérfanos |
 | `obtener_logger_estructurado(...)` | Factory de `StructuredLogger` (dry-run usa log separado) |
 
 ---
@@ -127,12 +128,14 @@ Tres niveles de protección antes de eliminar:
 
 ### `drive_status_manager.py` (mismo directorio)
 
-JSON persistente en `$PROJECT_LOCAL_ROOT/log-files/drive_status.json`:
+JSON persistente en `$PROJECT_LOCAL_ROOT/log-files/uploaded_files_registry.json`:
 
 | Función | Uso en gestor |
 |---------|---------------|
 | `ya_fue_subido(log_dir, nombre, tipo)` | Evitar subidas duplicadas |
 | `esta_protegido(log_dir, nombre, tipo)` | Proteger archivos con subida fallida |
+| `limpiar_archivos_inexistentes(log_dir, dirs, logger)` | Sincronización y poda de huérfanos tras retención |
+| `obtener_estadisticas(log_dir)` | Métricas de balance y control de inventario |
 
 ---
 
@@ -149,7 +152,9 @@ JSON persistente en `$PROJECT_LOCAL_ROOT/log-files/drive_status.json`:
   },
   "directorios": {
     "registro_continuo": "/ruta/datos/RC/",
-    "archivos_mseed": "/ruta/datos/MSEED/"
+    "archivos_mseed": "/ruta/datos/MSEED/",
+    "eventos_extraidos": "/ruta/datos/ED/",
+    "archivos_temporales": "/ruta/datos/tmp/"
   },
   "gestion_almacenamiento": {
     "umbrales": { "minimo": 10, "critico": 5 },
@@ -176,12 +181,21 @@ JSON persistente en `$PROJECT_LOCAL_ROOT/log-files/drive_status.json`:
 ## CLI
 
 ```bash
-python3 gestor_archivos_acq.py                          # Normal
-python3 gestor_archivos_acq.py --dry-run                # Simulación
-python3 gestor_archivos_acq.py --noauth_local_webserver  # Auth remota (SSH)
-```
+# Ejecución periódica regular (subida + retención + saneamiento)
+python3 gestor_archivos_acq.py
 
-**Dry-run**: No elimina ni sube archivos. Log separado: `gestor_acq_dry-run.log`.
+# Simulación completa (no sube, no borra de disco ni altera JSON)
+python3 gestor_archivos_acq.py --dry-run
+
+# Depuración inmediata del registro de subidas bajo demanda
+python3 gestor_archivos_acq.py --purge-registry
+
+# Simulación de depuración del registro (muestra inventario sin modificar)
+python3 gestor_archivos_acq.py --purge-registry --dry-run
+
+# Autenticación remota OAuth2 via SSH
+python3 gestor_archivos_acq.py --noauth_local_webserver
+```
 
 ---
 
@@ -198,7 +212,7 @@ python3 gestor_archivos_acq.py --noauth_local_webserver  # Auth remota (SSH)
 | `DELETE_AGE` | Eliminado por retención temporal |
 | `DELETE_SPACE` | Eliminado por espacio |
 | `UPLOAD_OK` / `UPLOAD_FAIL` | Via `subir_archivo.py` |
-| `SUMMARY` | Resumen final |
+| `SUMMARY` | Resumen final (incluye métricas `registry_cleanup` o `dry_run_cleanup`) |
 
 ---
 
