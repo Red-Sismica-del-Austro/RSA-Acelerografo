@@ -21,12 +21,22 @@ _OPERATION_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _OPERATION_DIR not in sys.path:
     sys.path.insert(0, _OPERATION_DIR)
 
-from mqtt.mqtt_coordinator import (
-    CommandDispatcher,
-    publicar_acquisition_status,
-    publicar_sensor_status,
-    publicar_drive_status,
-)
+try:
+    from mqtt.mqtt_coordinator import (
+        CommandDispatcher,
+        publicar_acquisition_status,
+        publicar_sensor_status,
+        publicar_drive_status,
+        publicar_state,
+    )
+except ImportError:
+    from mqtt_coordinator import (
+        CommandDispatcher,
+        publicar_acquisition_status,
+        publicar_sensor_status,
+        publicar_drive_status,
+        publicar_state,
+    )
 
 
 def _crear_config_dummy():
@@ -36,6 +46,7 @@ def _crear_config_dummy():
         "app": "seismic",
         "cap": "smart",
         "topics": {
+            "telemetry_state": "{org}/{app}/{cap}/{id}/telemetry/state",
             "status_acquisition": "{org}/{app}/{cap}/{id}/status/acquisition",
             "status_sensor": "{org}/{app}/{cap}/{id}/status/sensor",
             "status_drive": "{org}/{app}/{cap}/{id}/status/drive",
@@ -43,6 +54,7 @@ def _crear_config_dummy():
         },
         "qos": {"telemetry": 1, "commands": 1},
         "retain": {
+            "telemetry_state": True,
             "status_acquisition": True,
             "status_sensor": True,
             "status_drive": True,
@@ -206,6 +218,76 @@ def test_publicacion_acquisition_status_qos_y_retain():
     assert kwargs.get("retain") is True
 
 
+def test_publicacion_state_online_qos_y_retain():
+    """Valida publicación en tópico telemetry/state con QoS 1, retain = True y payload esperado."""
+    config = _crear_config_dummy()
+    mock_client = MagicMock()
+    mock_logger = MagicMock()
+    now_ts = "2026-09-18T10:30:00Z"
+
+    publicar_state(mock_client, config, "online", mock_logger, timestamp_override=now_ts)
+
+    mock_client.publish.assert_called_once()
+    args, kwargs = mock_client.publish.call_args
+    topic = args[0]
+    payload = json.loads(args[1])
+    assert topic == "rsa/seismic/smart/DEV0/telemetry/state"
+    assert payload["status"] == "online"
+    assert payload["timestamp"] == now_ts
+    assert kwargs.get("qos") == 1
+    assert kwargs.get("retain") is True
+
+
+def test_heartbeat_state_preserva_timestamp_ultimo_cambio():
+    """Valida que el heartbeat periódico de state preserve el timestamp de conexión en userdata."""
+    config = _crear_config_dummy()
+    mock_client = MagicMock()
+    mock_client.is_connected.return_value = True
+    mock_logger = MagicMock()
+    
+    session_ts = "2026-09-18T08:15:00Z"
+    userdata = {
+        "is_connected": True,
+        "last_state_change": session_ts
+    }
+
+    # Simular la lógica de heartbeat periódico del main loop
+    if mock_client.is_connected() or userdata.get("is_connected", False):
+        online_ts = userdata.get("last_state_change")
+        if online_ts:
+            publicar_state(mock_client, config, "online", mock_logger, timestamp_override=online_ts)
+
+    mock_client.publish.assert_called_once()
+    args, kwargs = mock_client.publish.call_args
+    topic = args[0]
+    payload = json.loads(args[1])
+    assert topic == "rsa/seismic/smart/DEV0/telemetry/state"
+    assert payload["status"] == "online"
+    assert payload["timestamp"] == session_ts
+    assert kwargs.get("qos") == 1
+    assert kwargs.get("retain") is True
+
+
+def test_heartbeat_state_no_publica_si_desconectado():
+    """Valida que el heartbeat periódico no emita si el cliente está desconectado."""
+    config = _crear_config_dummy()
+    mock_client = MagicMock()
+    mock_client.is_connected.return_value = False
+    mock_logger = MagicMock()
+    userdata = {
+        "is_connected": False,
+        "last_state_change": "2026-09-18T08:15:00Z"
+    }
+
+    # Simular la lógica de heartbeat periódico del main loop
+    if mock_client.is_connected() or userdata.get("is_connected", False):
+        online_ts = userdata.get("last_state_change")
+        if online_ts:
+            publicar_state(mock_client, config, "online", mock_logger, timestamp_override=online_ts)
+
+    mock_client.publish.assert_not_called()
+
+
 if __name__ == "__main__":
     tests = [
         test_cmd_stop_acquisition_safety_exitoso,
@@ -215,6 +297,9 @@ if __name__ == "__main__":
         test_publicacion_sensor_status_qos_y_retain,
         test_publicacion_drive_status_qos_y_retain,
         test_publicacion_acquisition_status_qos_y_retain,
+        test_publicacion_state_online_qos_y_retain,
+        test_heartbeat_state_preserva_timestamp_ultimo_cambio,
+        test_heartbeat_state_no_publica_si_desconectado,
     ]
 
     print("\n=================================================================")

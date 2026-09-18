@@ -41,7 +41,7 @@ graph TD
         CFG["config/set"]
     end
 
-    COORD -->|pub retain| T_STATE
+    COORD -->|pub retain (conexión + cada 5min)| T_STATE
     COORD -->|pub cada 5min| T_HEALTH
     COORD -->|pub cada 5min retain| S_ACQ
     COORD -->|pub cada 5min retain| S_SENS
@@ -68,7 +68,7 @@ Default: `rsa/seismic/smart/{id}/...`
 
 | Topic key | Template completo | QoS | Retain | Dirección |
 |---|---|---|---|---|
-| `telemetry_state` | `…/{id}/telemetry/state` | 1 | ✅ | Pub |
+| `telemetry_state` | `…/{id}/telemetry/state` | 1 | ✅ | Pub (conexión + Heartbeat cada 300s) |
 | `telemetry_health` | `…/{id}/telemetry/health` | 1 | ❌ | Pub (cada 300s) |
 | `status_acquisition` | `…/{id}/status/acquisition` | 1 | ✅ | Pub (cada 300s) |
 | `status_sensor` | `…/{id}/status/sensor` | 1 | ✅ | Pub (cada 300s) |
@@ -86,7 +86,7 @@ Default: `rsa/seismic/smart/{id}/...`
 
 ### State (`telemetry/state`)
 
-Publicado en: conexión (`"online"`), inicio (`"on"`), shutdown (`"offline"`), y como LWT.
+Publicado en: conexión (`"online"`), inicio (`"on"`), shutdown (`"offline"`), LWT ante desconexión inesperada, y **periódicamente cada 300 segundos como heartbeat** junto a `telemetry/health` (preservando el timestamp de la sesión activa `last_state_change` para reflejar uptime y sobreescribir posibles colisiones de LWT en el broker).
 
 ```json
 {"status": "online", "timestamp": "2026-09-14T18:03:58Z"}
@@ -306,6 +306,7 @@ userdata = {
     "boot_published": False,
     "last_state_change": None,
     "is_disconnected_logged": False,
+    "is_connected": False,
     "dispatcher": ...,
     "correlator": ...,
 }

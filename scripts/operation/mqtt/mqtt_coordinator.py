@@ -547,12 +547,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
     
     if rc == 0:
         logger.mqtt_connect(config["broker"]["address"], "ok")
-        
-        # Suscribirse a tópicos configurados
-        for sub_key in config["subscriptions"]:
-            topic = resolver_topico(config, sub_key)
-            client.subscribe(topic, qos=config["qos"].get("commands", 1))
-            logger.mqtt_subscribe(topic, 1)
+        userdata["is_connected"] = True
         
         # Publicar estado online diferido si es el primer arranque
         state_file = userdata["state_file_path"]
@@ -572,7 +567,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
             except Exception as e:
                 logger.error(f"[BOOT_SYNC_ERR] Error leyendo {state_file}: {e}")
 
-        # Intentar publicar 'online'
+        # Publicar 'online' de forma prioritaria inmediatamente al conectar
         now_ts = timestamp_iso()
         msg_info = publicar_state(client, config, "online", logger, timestamp_override=now_ts)
         
@@ -581,12 +576,19 @@ def on_connect(client, userdata, flags, rc, properties=None):
             guardar_estado("online", now_ts, userdata["state_file_path"], logger)
             userdata["last_state_change"] = now_ts
             userdata["is_disconnected_logged"] = False
+
+        # Suscribirse a tópicos configurados
+        for sub_key in config["subscriptions"]:
+            topic = resolver_topico(config, sub_key)
+            client.subscribe(topic, qos=config["qos"].get("commands", 1))
+            logger.mqtt_subscribe(topic, 1)
     else:
         logger.mqtt_error("connect", f"Código de error: {rc}")
 
 def on_disconnect(client, userdata, flags, rc=None, properties=None):
     """Callback de desconexión del broker."""
     logger = userdata["logger"]
+    userdata["is_connected"] = False
     # En v1, flags es el código de retorno (rc). En v2, rc es el reason_code.
     real_rc = rc if rc is not None else flags
     
@@ -935,7 +937,8 @@ def main():
         "state_file_path": state_file,
         "boot_published": False,
         "last_state_change": None,
-        "is_disconnected_logged": False
+        "is_disconnected_logged": False,
+        "is_connected": False
     }
     
     # Iniciar cliente
@@ -955,6 +958,14 @@ def main():
                 publicar_acquisition_status(client, config, watchdog, logger)
                 publicar_sensor_status(client, config, sensor_watchdog, logger)
                 publicar_drive_status(client, config, drive_watchdog, logger)
+                
+                # Heartbeat periódico de estado (Opción A: refresca retained en broker con timestamp original)
+                if client.is_connected() or userdata.get("is_connected", False):
+                    online_ts = userdata.get("last_state_change")
+                    if online_ts:
+                        logger.info(f"[HEARTBEAT_STATE] Refrescando telemetry_state (online desde {online_ts})")
+                        publicar_state(client, config, "online", logger, timestamp_override=online_ts)
+                
                 last_health = now
             
             # Re-publicación diaria a las 00:00
